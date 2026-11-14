@@ -23,6 +23,7 @@ import fr.voyage.livre.faces.FaceMatcher
 import fr.voyage.livre.faces.FaceRecognizer
 import fr.voyage.livre.faces.FaceRepository
 import fr.voyage.livre.share.PdfExporter
+import fr.voyage.livre.share.PdfQuality
 import fr.voyage.livre.share.ShareHelper
 import fr.voyage.livre.share.ShareTarget
 import kotlinx.coroutines.Dispatchers
@@ -516,13 +517,13 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Fabrique le livre en PDF imprimable (A4) puis propose de l'enregistrer ou de l'envoyer. */
-    fun exportPdf() {
+    fun exportPdf(quality: PdfQuality) {
         val s = _state.value
         if (s.book.pages.isEmpty()) { say("Aucune photo dans le livre."); return }
         viewModelScope.launch {
-            _state.update { it.copy(busyMessage = "Fabrication du PDF…") }
+            _state.update { it.copy(busyMessage = "Fabrication du PDF (photos en haute définition)…") }
             runCatching {
-                val file = PdfExporter.export(getApplication(), s.book, s.book.pages, s.people)
+                val file = PdfExporter.export(getApplication(), s.book, s.book.pages, s.people, quality)
                 PdfExporter.share(getApplication(), file, s.book)
             }.onFailure { say("PDF impossible : ${it.message}") }
             _state.update { it.copy(busyMessage = null) }

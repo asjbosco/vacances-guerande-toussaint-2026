@@ -36,8 +36,12 @@ Dans une histoire :
    passent directement à la photo d'à côté, et la liste revient sur la dernière photo ouverte.
    **Appui long** sur une photo pour en sélectionner plusieurs et les retirer d'un coup.
 5. **Feuilleter** – le livre se lit page par page, avec une couverture.
-6. **Partager** – WhatsApp, Facebook ou une autre application, chaque photo avec sa légende
-   incrustée ; ou **Livre PDF imprimable** (A4).
+6. **Partager** – WhatsApp, Facebook, **Quick Share** (vers un téléphone à côté) ou une autre
+   application, chaque photo avec sa légende incrustée ; ou le **livre en PDF** (A4) :
+   - *haute qualité* (~300 dpi, pour imprimer ou zoomer) ou *léger* (envoi rapide) ;
+   - les photos sont reprises **depuis l'original de la galerie** et intégrées en JPEG, sans
+     perte supplémentaire. Envoyé comme document, WhatsApp ne recompresse pas le PDF ;
+     pour les photos seules, choisir « HD » dans WhatsApp avant l'envoi.
 
 ## Installer l'application sur le téléphone
 

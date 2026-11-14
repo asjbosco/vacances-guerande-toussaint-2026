@@ -28,6 +28,8 @@ import java.io.FileOutputStream
 enum class ShareTarget(val packages: List<String>) {
     WHATSAPP(listOf("com.whatsapp", "com.whatsapp.w4b")),
     FACEBOOK(listOf("com.facebook.katana")),
+    /** Quick Share : celui de Samsung, sinon celui de Google (services Google Play). */
+    QUICK_SHARE(listOf("com.samsung.android.app.sharelive", "com.google.android.gms")),
     OTHER(emptyList()),
 }
 
@@ -52,9 +54,9 @@ object ShareHelper {
                 deleteRecursively(); mkdirs()
             }
             pages.mapIndexedNotNull { i, page ->
-                val bitmap = renderPage(page, people) ?: return@mapIndexedNotNull null
+                val bitmap = renderPage(context, page, people) ?: return@mapIndexedNotNull null
                 val file = File(dir, "page_%02d.jpg".format(i + 1))
-                FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                FileOutputStream(file).use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
                 FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
             }
         }
@@ -91,8 +93,8 @@ object ShareHelper {
         runCatching { context.packageManager.getPackageInfo(pkg, 0); true }.getOrDefault(false)
 
     /** Dessine la photo avec un bandeau de légende en dessous. */
-    fun renderPage(page: BookPage, people: List<Participant>): Bitmap? {
-        val photo = PhotoImporter.decodeFileScaled(page.photoPath, 1600) ?: return null
+    fun renderPage(context: Context, page: BookPage, people: List<Participant>): Bitmap? {
+        val photo = PhotoImporter.decodeBest(context, page, 2560) ?: return null
         val w = photo.width
         val margin = (w * 0.045f)
         val textWidth = (w - 2 * margin).toInt()

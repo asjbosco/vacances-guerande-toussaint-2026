@@ -14,6 +14,8 @@
         <package android:name="com.whatsapp" />
         <package android:name="com.whatsapp.w4b" />
         <package android:name="com.facebook.katana" />
+        <package android:name="com.samsung.android.app.sharelive" />
+        <package android:name="com.google.android.gms" />
         <intent>
             <action android:name="android.intent.action.SEND_MULTIPLE" />
             <data android:mimeType="image/*" />
@@ -22,6 +24,7 @@
 
     <application
         android:allowBackup="true"
+        android:largeHeap="true"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
         android:label="@string/app_name"

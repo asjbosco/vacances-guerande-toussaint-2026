@@ -191,7 +191,7 @@ fun StoryScreen(state: UiState, vm: BookViewModel) {
     if (showShare) {
         ShareDialog(
             onDismiss = { showShare = false },
-            onPdf = { showShare = false; vm.exportPdf() },
+            onPdf = { quality -> showShare = false; vm.exportPdf(quality) },
         ) { target ->
             showShare = false
             vm.share(target)

@@ -28,7 +28,7 @@ import kotlin.math.roundToInt
  */
 object PhotoImporter {
 
-    private const val MAX_SIDE = 2048
+    private const val MAX_SIDE = 3000
 
     suspend fun import(context: Context, uri: Uri, fallbackTakenAt: Long?, photosDir: File): BookPage =
         withContext(Dispatchers.IO) {
@@ -53,7 +53,7 @@ object PhotoImporter {
 
             val id = UUID.randomUUID().toString()
             val out = File(photosDir, "$id.jpg")
-            FileOutputStream(out).use { rotated.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            FileOutputStream(out).use { rotated.compress(Bitmap.CompressFormat.JPEG, 92, it) }
 
             BookPage(
                 id = id,
@@ -113,5 +113,29 @@ object PhotoImporter {
         return Bitmap.createScaledBitmap(
             decoded, (decoded.width * ratio).roundToInt(), (decoded.height * ratio).roundToInt(), true
         )
+    }
+
+    /**
+     * La meilleure image disponible pour une page : la photo d'origine de la galerie (pleine
+     * qualité, bien orientée), ou à défaut la copie gardée par l'application.
+     */
+    fun decodeBest(context: Context, page: BookPage, maxSide: Int): Bitmap? {
+        val original = runCatching {
+            val uri = Uri.parse(page.sourceUri)
+            val rotation = context.contentResolver.openInputStream(originalUri(context, uri))
+                ?.use { ExifInterface(it).rotationDegrees } ?: 0
+            decodeScaled(context, uri, maxSide)?.let { bmp ->
+                if (rotation == 0) bmp
+                else Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
+            }
+        }.getOrNull()
+        return original ?: decodeFileScaled(page.photoPath, maxSide)
+    }
+
+    /** Largeur et hauteur de la copie gardée par l'application (même cadrage que l'original). */
+    fun size(path: String): Pair<Int, Int>? {
+        val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, o)
+        return if (o.outWidth > 0 && o.outHeight > 0) o.outWidth to o.outHeight else null
     }
 }

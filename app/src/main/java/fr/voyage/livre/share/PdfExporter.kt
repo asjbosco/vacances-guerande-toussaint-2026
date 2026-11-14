@@ -24,6 +24,12 @@ import fr.voyage.livre.data.CaptionFormat
 import fr.voyage.livre.data.Participant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 
@@ -32,6 +38,15 @@ import java.io.FileOutputStream
  * une couverture, puis une page par photo avec le lieu, la date,
  * le texte et la légende « Avec … ».
  */
+/** Qualité des photos dans le PDF. */
+enum class PdfQuality(val maxSide: Int, val jpegQuality: Int) {
+    /** ~300 dpi sur une page A4 : pour imprimer ou agrandir à l'écran. */
+    HIGH(3000, 92),
+
+    /** Plus léger, pour un envoi rapide (toujours net sur un téléphone). */
+    LIGHT(1800, 85),
+}
+
 object PdfExporter {
 
     // A4 en points PDF (1/72 de pouce).
@@ -39,26 +54,81 @@ object PdfExporter {
     private const val PAGE_H = 842
     private const val MARGIN = 48f
 
-    /** Résolution des photos dans le PDF : ~200 dpi sur la largeur imprimable. */
-    private const val PHOTO_MAX_SIDE = 1400
+    /** Emplacement réservé à une photo, rempli ensuite en JPEG haute définition. */
+    private data class PhotoSlot(val pageIndex: Int, val page: BookPage, val rect: RectF, val crop: Boolean)
 
     private val INK = Color.rgb(40, 40, 40)
     private val ACCENT = Color.rgb(31, 95, 122)
     private val MUTED = Color.rgb(110, 110, 110)
     private val PAPER = Color.rgb(251, 247, 240)
 
-    suspend fun export(context: Context, book: Book, pages: List<BookPage>, people: List<Participant>): File = withContext(Dispatchers.IO) {
+    /**
+     * 1. La mise en page (fond, textes) est dessinée avec l'outil PDF d'Android, en laissant la
+     *    place des photos. 2. Les photos sont ensuite posées en JPEG, depuis l'original de la
+     *    galerie, à la résolution choisie : aucune perte supplémentaire.
+     */
+    suspend fun export(
+        context: Context,
+        book: Book,
+        pages: List<BookPage>,
+        people: List<Participant>,
+        quality: PdfQuality,
+    ): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "partage").apply { mkdirs() }
         val file = File(dir, fileName(book))
-        val doc = PdfDocument()
+        val base = File(dir, "mise-en-page.pdf")
+        val slots = mutableListOf<PhotoSlot>()
+
+        val layoutDoc = PdfDocument()
         try {
-            drawCover(doc, book, pages, book.travelers(people))
-            pages.forEachIndexed { i, page -> drawPhotoPage(doc, page, people, i + 2) }
-            FileOutputStream(file).use { doc.writeTo(it) }
+            drawCover(layoutDoc, book, pages, book.travelers(people), slots)
+            pages.forEachIndexed { i, page -> drawPhotoPage(layoutDoc, page, people, i + 2, slots) }
+            FileOutputStream(base).use { layoutDoc.writeTo(it) }
         } finally {
-            doc.close()
+            layoutDoc.close()
         }
+
+        PDFBoxResourceLoader.init(context)
+        PDDocument.load(base, MemoryUsageSetting.setupTempFileOnly()).use { doc ->
+            for (slot in slots) {
+                val jpeg = jpegFor(context, slot.page, quality) ?: continue
+                val image = JPEGFactory.createFromByteArray(doc, jpeg)
+                PDPageContentStream(doc, doc.getPage(slot.pageIndex), PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
+                    // Le PDF compte les hauteurs depuis le bas de la page.
+                    val r = slot.rect
+                    val x = r.left
+                    val y = PAGE_H - r.bottom
+                    if (slot.crop) {
+                        val scale = maxOf(r.width() / image.width, r.height() / image.height)
+                        val w = image.width * scale
+                        val h = image.height * scale
+                        cs.saveGraphicsState()
+                        cs.addRect(x, y, r.width(), r.height())
+                        cs.clip()
+                        cs.drawImage(image, x + (r.width() - w) / 2f, y + (r.height() - h) / 2f, w, h)
+                        cs.restoreGraphicsState()
+                    } else {
+                        cs.drawImage(image, x, y, r.width(), r.height())
+                    }
+                }
+            }
+            doc.save(file)
+        }
+        base.delete()
         file
+    }
+
+    /** La photo en JPEG à la résolution demandée, depuis l'original si possible. */
+    private fun jpegFor(context: Context, page: BookPage, quality: PdfQuality): ByteArray? {
+        val bitmap = PhotoImporter.decodeBest(context, page, quality.maxSide) ?: return null
+        return try {
+            ByteArrayOutputStream().use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, quality.jpegQuality, out)
+                out.toByteArray()
+            }
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     /** Ouvre le choix d'application (Drive, Fichiers, impression, WhatsApp…) pour le PDF. */
@@ -87,7 +157,9 @@ object PdfExporter {
 
     // ---------- Couverture ----------
 
-    private fun drawCover(doc: PdfDocument, book: Book, pages: List<BookPage>, travelers: List<Participant>) {
+    private fun drawCover(
+        doc: PdfDocument, book: Book, pages: List<BookPage>, travelers: List<Participant>, slots: MutableList<PhotoSlot>,
+    ) {
         val pdfPage = doc.startPage(PdfDocument.PageInfo.Builder(PAGE_W, PAGE_H, 1).create())
         val canvas = pdfPage.canvas
         canvas.drawColor(PAPER)
@@ -96,10 +168,7 @@ object PdfExporter {
         // Photo de couverture : la première du livre, en haut, recadrée.
         val coverHeight = PAGE_H * 0.48f
         pages.firstOrNull()?.let { first ->
-            PhotoImporter.decodeFileScaled(first.photoPath, PHOTO_MAX_SIDE)?.let { photo ->
-                drawCropped(canvas, photo, RectF(0f, 0f, PAGE_W.toFloat(), coverHeight))
-                photo.recycle()
-            }
+            slots += PhotoSlot(0, first, RectF(0f, 0f, PAGE_W.toFloat(), coverHeight), crop = true)
         }
 
         var y = if (pages.isEmpty()) PAGE_H * 0.3f else coverHeight + 48f
@@ -134,7 +203,9 @@ object PdfExporter {
 
     // ---------- Pages photo ----------
 
-    private fun drawPhotoPage(doc: PdfDocument, page: BookPage, people: List<Participant>, number: Int) {
+    private fun drawPhotoPage(
+        doc: PdfDocument, page: BookPage, people: List<Participant>, number: Int, slots: MutableList<PhotoSlot>,
+    ) {
         val pdfPage = doc.startPage(PdfDocument.PageInfo.Builder(PAGE_W, PAGE_H, number).create())
         val canvas = pdfPage.canvas
         canvas.drawColor(Color.WHITE)
@@ -153,13 +224,13 @@ object PdfExporter {
         val photoMaxH = (PAGE_H - 2 * MARGIN - footerSpace - textHeight - 20f).coerceAtLeast(PAGE_H * 0.35f)
 
         var y = MARGIN
-        PhotoImporter.decodeFileScaled(page.photoPath, PHOTO_MAX_SIDE)?.let { photo ->
-            val scale = minOf(width / photo.width.toFloat(), photoMaxH / photo.height.toFloat())
-            val w = photo.width * scale
-            val h = photo.height * scale
+        // Place de la photo (même cadrage que la copie de l'application), remplie à la fin.
+        PhotoImporter.size(page.photoPath)?.let { (pw, ph) ->
+            val scale = minOf(width / pw.toFloat(), photoMaxH / ph.toFloat())
+            val w = pw * scale
+            val h = ph * scale
             val left = (PAGE_W - w) / 2f
-            canvas.drawBitmap(photo, null, RectF(left, y, left + w, y + h), Paint(Paint.FILTER_BITMAP_FLAG))
-            photo.recycle()
+            slots += PhotoSlot(number - 1, page, RectF(left, y, left + w, y + h), crop = false)
             y += h + 20f
         }
 
@@ -177,21 +248,6 @@ object PdfExporter {
     }
 
     // ---------- Outils de dessin ----------
-
-    private fun drawCropped(canvas: Canvas, photo: Bitmap, dst: RectF) {
-        val dstRatio = dst.width() / dst.height()
-        val srcRatio = photo.width / photo.height.toFloat()
-        val src = if (srcRatio > dstRatio) {
-            val w = (photo.height * dstRatio).toInt()
-            val x = (photo.width - w) / 2
-            Rect(x, 0, x + w, photo.height)
-        } else {
-            val h = (photo.width / dstRatio).toInt()
-            val yy = (photo.height - h) / 2
-            Rect(0, yy, photo.width, yy + h)
-        }
-        canvas.drawBitmap(photo, src, dst, Paint(Paint.FILTER_BITMAP_FLAG))
-    }
 
     private fun layout(
         text: String, paint: TextPaint, width: Int,

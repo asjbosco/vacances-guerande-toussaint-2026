@@ -53,6 +53,10 @@ android {
                 "META-INF/FastDoubleParser-*",
                 "META-INF/thirdparty-LICENSE",
                 "META-INF/bigint-LICENSE",
+                "META-INF/versions/**/module-info.class",
+                "META-INF/*.SF",
+                "META-INF/*.DSA",
+                "META-INF/*.RSA",
             )
             pickFirsts += setOf("META-INF/io.netty.versions.properties")
         }
@@ -80,6 +84,9 @@ dependencies {
     // Reconnaissance des visages, sur le téléphone
     implementation("com.google.mlkit:face-detection:16.1.7")
     implementation("org.tensorflow:tensorflow-lite:2.16.1")
+
+    // PDF : photos intégrées en JPEG haute définition
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
     // SDK officiel Anthropic (Claude)
     implementation("com.anthropic:anthropic-java:3.3.0")
