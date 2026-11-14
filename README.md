@@ -17,13 +17,20 @@ chaque photo reçoit le **lieu**, un **court texte historique ou géographique**
      d'écart, réglable ; ou moins de 20 minutes d'écart pour les photos sans GPS), l'histoire du
      lieu n'est racontée qu'une fois. Les photos suivantes reçoivent une phrase sur ce qu'elles
      ajoutent (un détail, un autre point de vue).
-3. **Relire et compléter** – chaque légende est modifiable ; on coche les participants
+3. **Reconnaître les visages** – l'application repère les visages sur les photos et
+   reconnaît les personnes déjà nommées. Pour les visages inconnus, elle les regroupe et
+   demande une seule fois par personne « Qui est-ce ? » (un proche de la liste, ou un nouveau
+   nom ajouté à la liste). Elle coche ensuite elle-même les participants sur chaque photo ;
+   il suffit de décocher les erreurs (l'application ne se servira plus de ce visage).
+   Tout se fait **sur le téléphone** : aucune photo de visage n'est envoyée sur Internet.
+   Les personnes nommées restent connues pour les voyages suivants.
+4. **Relire et compléter** – chaque légende est modifiable ; on coche les participants
    présents sur la photo (bouton « Tout le monde » pour aller vite).
-4. **Feuilleter** – le livre se lit page par page, avec une couverture.
-5. **Partager** – WhatsApp, Facebook (profil ou Page) ou toute autre application.
+5. **Feuilleter** – le livre se lit page par page, avec une couverture.
+6. **Partager** – WhatsApp, Facebook (profil ou Page) ou toute autre application.
    Chaque photo est envoyée avec sa légende **incrustée en dessous**, pour que le texte
    reste visible même là où l'application ne reprend pas les légendes (Facebook).
-6. **Livre PDF imprimable** – dans « Partager », le bouton *Livre PDF imprimable* fabrique
+7. **Livre PDF imprimable** – dans « Partager », le bouton *Livre PDF imprimable* fabrique
    tout le livre au format A4 : une couverture (titre, dates, participants, première photo),
    puis une page par photo avec le lieu, la date, le texte et « Avec … ». On peut ensuite
    l'enregistrer (Drive, Fichiers), l'envoyer ou l'imprimer.
@@ -42,7 +49,9 @@ chaque photo reçoit le **lieu**, un **court texte historique ou géographique**
 ## Réglages au premier lancement (⚙️)
 
 - **Le voyage** : titre, région visitée, dates (pré-remplis pour Guérande, Toussaint 2026).
-- **Participants** : Emmanuel, Gaëlle, Albéric, Maylis, Victor, Juliette et Charlotte sont déjà enregistrés ; on peut en ajouter ou en retirer.
+- **Famille et proches** : Emmanuel, Gaëlle, Albéric, Maylis, Victor, Juliette et Charlotte sont déjà enregistrés
+  comme participants du voyage. On peut ajouter d'autres proches (case « Du voyage » décochée) :
+  ils ne figurent pas sur la couverture mais peuvent être reconnus sur les photos.
 - **Clé API Claude** : à créer sur <https://console.anthropic.com> (rubrique *API Keys*).
   Elle reste enregistrée uniquement sur le téléphone. Coût indicatif : environ 1 centime par photo.
 
@@ -58,4 +67,11 @@ chaque photo reçoit le **lieu**, un **court texte historique ou géographique**
 ## Technique
 
 Kotlin, Jetpack Compose, SDK Java officiel d'Anthropic (modèle `claude-opus-5-5`),
-API Wikipédia, Geocoder Android. Android 8.0 minimum.
+API Wikipédia, Geocoder Android, ML Kit (détection des visages) et modèle FaceNet en
+TensorFlow Lite (empreinte des visages). Android 8.0 minimum.
+
+Le modèle `facenet.tflite` provient du projet
+[FaceRecognition_With_FaceNet_Android](https://github.com/shubham0204/FaceRecognition_With_FaceNet_Android)
+(licence Apache 2.0), converti du FaceNet de David Sandberg (licence MIT). Il est téléchargé
+automatiquement à la compilation ; pour compiler sur votre ordinateur, placez-le dans
+`app/src/main/assets/`.

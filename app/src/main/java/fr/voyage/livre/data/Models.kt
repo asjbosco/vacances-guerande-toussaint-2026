@@ -13,6 +13,8 @@ data class Participant(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val description: String = "",
+    /** Faisait partie du voyage (affiché sur la couverture) ; sinon simple proche reconnu sur les photos. */
+    val onTrip: Boolean = true,
 )
 
 @Serializable
@@ -34,6 +36,8 @@ data class BookPage(
     val participantIds: List<String> = emptyList(),
     val status: AnnotationStatus = AnnotationStatus.TODO,
     val error: String? = null,
+    /** Les visages de cette photo ont déjà été repérés. */
+    val facesScanned: Boolean = false,
 ) {
     val hasGps: Boolean get() = latitude != null && longitude != null
 }
@@ -50,7 +54,10 @@ data class Book(
     val groupRadiusMeters: Int = 300,
     val participants: List<Participant> = DEFAULT_PARTICIPANTS,
     val pages: List<BookPage> = emptyList(),
-)
+) {
+    /** Les personnes du voyage (couverture du livre). */
+    val travelers: List<Participant> get() = participants.filter { it.onTrip }
+}
 
 /** Les voyageurs de Guérande, Toussaint 2026 (modifiables dans les réglages). */
 val DEFAULT_PARTICIPANTS = listOf(
@@ -78,3 +85,23 @@ fun BookPage.isNear(other: BookPage, radiusMeters: Int): Boolean {
     val t2 = other.takenAt ?: return false
     return kotlin.math.abs(t1 - t2) <= 20 * 60 * 1000L
 }
+
+/** Un visage repéré sur une photo du livre. */
+@Serializable
+data class FaceRecord(
+    val id: String = UUID.randomUUID().toString(),
+    val pageId: String,
+    /** Petite image du visage, montrée dans « Qui est-ce ? ». */
+    val thumbPath: String,
+    /** Empreinte du visage (128 nombres) calculée sur le téléphone. */
+    val embedding: List<Float>,
+    /** La personne reconnue, ou null si inconnue. */
+    val personId: String? = null,
+    /** true si l'application a reconnu la personne seule ; false si c'est vous qui l'avez nommée. */
+    val auto: Boolean = false,
+    /** Visage à ne plus proposer (inconnu, erreur corrigée, pas un visage…). */
+    val ignored: Boolean = false,
+)
+
+@Serializable
+data class FaceIndex(val faces: List<FaceRecord> = emptyList())

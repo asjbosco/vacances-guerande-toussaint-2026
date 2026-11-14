@@ -27,6 +27,15 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # Modèle FaceNet (reconnaissance des visages), trop gros pour le dépôt :
+      # téléchargé à chaque compilation et vérifié par son empreinte.
+      - name: Télécharger le modèle de visages
+        run: |
+          mkdir -p app/src/main/assets
+          curl -fsSL -o app/src/main/assets/facenet.tflite \
+            https://raw.githubusercontent.com/shubham0204/FaceRecognition_With_FaceNet_Android/master/app/src/main/assets/facenet.tflite
+          echo "d7c1f7f130376982c7004920ddc41925ac2e5aecf6522f476c8bbb3669db7013  app/src/main/assets/facenet.tflite" | sha256sum -c -
+
       - name: Compiler l'APK
         run: |
           chmod +x gradlew

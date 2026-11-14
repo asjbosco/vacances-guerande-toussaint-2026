@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -46,6 +47,7 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
     var radius by rememberSaveable { mutableStateOf(book.groupRadiusMeters.toString()) }
     var newName by rememberSaveable { mutableStateOf("") }
     var newDescription by rememberSaveable { mutableStateOf("") }
+    var newOnTrip by rememberSaveable { mutableStateOf(false) }
     var apiKey by rememberSaveable { mutableStateOf("") }
 
     Scaffold(
@@ -91,7 +93,12 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
             Button(onClick = { vm.saveBookInfo(title, destination, start, end, radius) }) { Text("Enregistrer") }
 
             HorizontalDivider()
-            Text("Participants", style = MaterialTheme.typography.titleMedium)
+            Text("Famille et proches", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Cochez « Du voyage » pour les personnes qui figurent sur la couverture. " +
+                    "Les autres proches peuvent être reconnus sur les photos.",
+                style = MaterialTheme.typography.bodySmall,
+            )
             book.participants.forEach { p ->
                 Card(Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -99,19 +106,25 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
                             Text(p.name, style = MaterialTheme.typography.bodyLarge)
                             if (p.description.isNotBlank()) Text(p.description, style = MaterialTheme.typography.bodySmall)
                         }
+                        Text("Du voyage", style = MaterialTheme.typography.labelSmall)
+                        Checkbox(checked = p.onTrip, onCheckedChange = { vm.setOnTrip(p.id, it) })
                         IconButton(onClick = { vm.removeParticipant(p.id) }) { Icon(Icons.Default.Close, "Retirer ${p.name}") }
                     }
                 }
             }
-            OutlinedTextField(newName, { newName = it }, label = { Text("Prénom") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(newName, { newName = it }, label = { Text("Prénom (ou nom)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(
                 newDescription, { newDescription = it }, label = { Text("Surnom ou description (facultatif)") },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = newOnTrip, onCheckedChange = { newOnTrip = it })
+                Text("Faisait partie du voyage")
+            }
             OutlinedButton(
-                onClick = { vm.addParticipant(newName, newDescription); newName = ""; newDescription = "" },
+                onClick = { vm.addParticipant(newName, newDescription, newOnTrip); newName = ""; newDescription = "" },
                 enabled = newName.isNotBlank(),
-            ) { Text("Ajouter ce participant") }
+            ) { Text("Ajouter cette personne") }
 
             HorizontalDivider()
             Text("Claude (rédaction des légendes)", style = MaterialTheme.typography.titleMedium)

@@ -36,6 +36,10 @@ android {
     buildFeatures {
         compose = true
     }
+    androidResources {
+        // Le modèle de visages est lu directement depuis l'APK : il ne doit pas être compressé.
+        noCompress += "tflite"
+    }
     packaging {
         resources {
             excludes += setOf(
@@ -72,6 +76,10 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // Reconnaissance des visages, sur le téléphone
+    implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
 
     // SDK officiel Anthropic (Claude)
     implementation("com.anthropic:anthropic-java:3.3.0")

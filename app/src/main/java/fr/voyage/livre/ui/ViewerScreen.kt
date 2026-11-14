@@ -82,9 +82,9 @@ private fun Cover(state: UiState) {
             )
             Text(book.destination, fontFamily = FontFamily.Serif, textAlign = TextAlign.Center)
             Text("Du ${book.startDate} au ${book.endDate}", style = MaterialTheme.typography.bodySmall)
-            if (book.participants.isNotEmpty()) {
+            if (book.travelers.isNotEmpty()) {
                 Text(
-                    book.participants.joinToString(", ") { it.name },
+                    book.travelers.joinToString(", ") { it.name },
                     fontStyle = FontStyle.Italic, textAlign = TextAlign.Center,
                 )
             }

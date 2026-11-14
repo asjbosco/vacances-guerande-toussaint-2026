@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.voyage.livre.ui.BookViewModel
 import fr.voyage.livre.ui.EditorScreen
+import fr.voyage.livre.ui.FacesScreen
 import fr.voyage.livre.ui.HomeScreen
 import fr.voyage.livre.ui.PickerScreen
 import fr.voyage.livre.ui.Screen
@@ -39,6 +40,7 @@ class MainActivity : ComponentActivity() {
                     is Screen.Editor -> EditorScreen(state, viewModel, s.pageId)
                     is Screen.Viewer -> ViewerScreen(state, viewModel, s.startIndex)
                     Screen.Settings -> SettingsScreen(state, viewModel)
+                    Screen.Faces -> FacesScreen(state, viewModel)
                 }
             }
         }

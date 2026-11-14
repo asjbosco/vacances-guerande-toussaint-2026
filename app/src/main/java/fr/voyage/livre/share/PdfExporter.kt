@@ -118,8 +118,8 @@ object PdfExporter {
         canvas.drawLine(PAGE_W / 2f - 60f, y, PAGE_W / 2f + 60f, y, line)
         y += 22f
 
-        if (book.participants.isNotEmpty()) {
-            val names = book.participants.joinToString(", ") { it.name }
+        if (book.travelers.isNotEmpty()) {
+            val names = book.travelers.joinToString(", ") { it.name }
             drawText(canvas, "Avec $names", serif(13f, color = INK), MARGIN, y, width, Layout.Alignment.ALIGN_CENTER)
         }
 

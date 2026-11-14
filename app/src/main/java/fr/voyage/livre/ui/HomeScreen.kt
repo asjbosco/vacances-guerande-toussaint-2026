@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -98,6 +99,15 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
                     Spacer(Modifier.width(8.dp))
                     Text(if (allDone) "2. Réécrire toutes les légendes" else "2. Rédiger les légendes")
                 }
+                FilledTonalButton(
+                    onClick = { vm.recognizeFaces() },
+                    enabled = book.pages.isNotEmpty() && state.busyMessage == null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Default.Face, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("3. Reconnaître les visages")
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
                         onClick = { vm.open(Screen.Viewer(0)) },
@@ -106,7 +116,7 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
                     ) {
                         Icon(Icons.AutoMirrored.Filled.MenuBook, null)
                         Spacer(Modifier.width(6.dp))
-                        Text("3. Feuilleter")
+                        Text("4. Feuilleter")
                     }
                     OutlinedButton(
                         onClick = { showShare = true },
@@ -115,7 +125,7 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
                     ) {
                         Icon(Icons.Default.Share, null)
                         Spacer(Modifier.width(6.dp))
-                        Text("4. Partager")
+                        Text("5. Partager")
                     }
                 }
                 if (book.participants.isEmpty()) {
