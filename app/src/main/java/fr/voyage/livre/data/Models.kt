@@ -1,0 +1,51 @@
+package fr.voyage.livre.data
+
+import kotlinx.serialization.Serializable
+import java.util.UUID
+
+@Serializable
+data class Participant(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val description: String = "",
+)
+
+@Serializable
+enum class AnnotationStatus { TODO, RUNNING, DONE, ERROR }
+
+@Serializable
+data class BookPage(
+    val id: String = UUID.randomUUID().toString(),
+    /** Copie de la photo dans le stockage privé de l'application. */
+    val photoPath: String,
+    /** Adresse de la photo d'origine dans la galerie (pour éviter les doublons). */
+    val sourceUri: String,
+    val takenAt: Long? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val place: String = "",
+    val summary: String = "",
+    val wikiTitle: String = "",
+    val participantIds: List<String> = emptyList(),
+    val status: AnnotationStatus = AnnotationStatus.TODO,
+    val error: String? = null,
+) {
+    val hasGps: Boolean get() = latitude != null && longitude != null
+}
+
+@Serializable
+data class Book(
+    val title: String = "Vacances à Guérande – Toussaint 2026",
+    /** Région du voyage : aide à retrouver le lieu quand une photo n'a pas de GPS. */
+    val destination: String = "Guérande et la presqu'île guérandaise (Loire-Atlantique)",
+    /** Dates au format jj/mm/aaaa, utilisées pour filtrer la galerie. */
+    val startDate: String = "17/10/2026",
+    val endDate: String = "02/11/2026",
+    val participants: List<Participant> = DEFAULT_PARTICIPANTS,
+    val pages: List<BookPage> = emptyList(),
+)
+
+/** Les voyageurs de Guérande, Toussaint 2026 (modifiables dans les réglages). */
+val DEFAULT_PARTICIPANTS = listOf(
+    "Emmanuel", "Gaëlle", "Albéric", "Maylis", "Victor", "Juliette", "Charlotte",
+).map { Participant(id = "p-" + it.lowercase(), name = it) }
