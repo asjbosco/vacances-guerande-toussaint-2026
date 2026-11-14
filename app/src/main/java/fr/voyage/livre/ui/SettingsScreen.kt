@@ -43,6 +43,7 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
     var destination by rememberSaveable { mutableStateOf(book.destination) }
     var start by rememberSaveable { mutableStateOf(book.startDate) }
     var end by rememberSaveable { mutableStateOf(book.endDate) }
+    var radius by rememberSaveable { mutableStateOf(book.groupRadiusMeters.toString()) }
     var newName by rememberSaveable { mutableStateOf("") }
     var newDescription by rememberSaveable { mutableStateOf("") }
     var apiKey by rememberSaveable { mutableStateOf("") }
@@ -79,7 +80,15 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
                     modifier = Modifier.weight(1f),
                 )
             }
-            Button(onClick = { vm.saveBookInfo(title, destination, start, end) }) { Text("Enregistrer") }
+            OutlinedTextField(
+                radius, { radius = it.filter(Char::isDigit) },
+                label = { Text("Photos voisines : distance (mètres)") },
+                supportingText = { Text("En dessous de cette distance, l'histoire du lieu n'est racontée qu'une fois") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(onClick = { vm.saveBookInfo(title, destination, start, end, radius) }) { Text("Enregistrer") }
 
             HorizontalDivider()
             Text("Participants", style = MaterialTheme.typography.titleMedium)

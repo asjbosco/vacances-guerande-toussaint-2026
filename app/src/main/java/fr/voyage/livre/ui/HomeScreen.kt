@@ -88,14 +88,15 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
                     Spacer(Modifier.width(8.dp))
                     Text("1. Choisir les photos du voyage")
                 }
+                val allDone = book.pages.isNotEmpty() && book.pages.all { it.status == AnnotationStatus.DONE }
                 FilledTonalButton(
-                    onClick = { vm.annotateAll() },
+                    onClick = { vm.annotateAll(onlyMissing = !allDone) },
                     enabled = book.pages.isNotEmpty() && state.busyMessage == null,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Default.AutoAwesome, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("2. Rédiger les légendes")
+                    Text(if (allDone) "2. Réécrire toutes les légendes" else "2. Rédiger les légendes")
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(

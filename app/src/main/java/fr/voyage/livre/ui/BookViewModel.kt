@@ -121,6 +121,11 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Annotation ----------
 
     fun annotateAll(onlyMissing: Boolean = true) {
+        if (annotateJob?.isActive == true) return
+        if (!onlyMissing) {
+            // On repart de zéro pour que les photos voisines ne se répètent pas.
+            editBook { b -> b.copy(pages = b.pages.map { it.copy(status = AnnotationStatus.TODO) }) }
+        }
         val pages = _state.value.book.pages.filter {
             !onlyMissing || it.status != AnnotationStatus.DONE
         }
@@ -193,12 +198,19 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Réglages ----------
 
-    fun saveBookInfo(title: String, destination: String, start: String, end: String) {
+    fun saveBookInfo(title: String, destination: String, start: String, end: String, radius: String) {
         if (parseDate(start) == null || parseDate(end) == null) {
             say("Dates attendues au format jj/mm/aaaa")
             return
         }
-        editBook { it.copy(title = title.trim(), destination = destination.trim(), startDate = start.trim(), endDate = end.trim()) }
+        val meters = radius.trim().toIntOrNull()?.takeIf { it in 0..20_000 }
+            ?: run { say("Distance attendue en mètres (ex. 300)"); return }
+        editBook {
+            it.copy(
+                title = title.trim(), destination = destination.trim(),
+                startDate = start.trim(), endDate = end.trim(), groupRadiusMeters = meters,
+            )
+        }
         say("Enregistré")
     }
 

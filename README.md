@@ -13,6 +13,10 @@ chaque photo reçoit le **lieu**, un **court texte historique ou géographique**
    - l'application cherche les articles **Wikipédia** les plus proches de cet endroit ;
    - **Claude** regarde la photo, choisit l'article qui correspond et écrit 2 à 3 phrases
      sur l'intérêt du lieu. Sans clé API, le début de l'article Wikipédia est repris tel quel.
+   - **Photos voisines** : quand plusieurs photos sont prises au même endroit (moins de 300 m
+     d'écart, réglable ; ou moins de 20 minutes d'écart pour les photos sans GPS), l'histoire du
+     lieu n'est racontée qu'une fois. Les photos suivantes reçoivent une phrase sur ce qu'elles
+     ajoutent (un détail, un autre point de vue).
 3. **Relire et compléter** – chaque légende est modifiable ; on coche les participants
    présents sur la photo (bouton « Tout le monde » pour aller vite).
 4. **Feuilleter** – le livre se lit page par page, avec une couverture.

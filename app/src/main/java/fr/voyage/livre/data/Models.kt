@@ -1,6 +1,11 @@
 package fr.voyage.livre.data
 
 import kotlinx.serialization.Serializable
+import kotlin.math.asin
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 import java.util.UUID
 
 @Serializable
@@ -41,6 +46,8 @@ data class Book(
     /** Dates au format jj/mm/aaaa, utilisées pour filtrer la galerie. */
     val startDate: String = "17/10/2026",
     val endDate: String = "02/11/2026",
+    /** Deux photos plus proches que cette distance partagent le même contexte historique. */
+    val groupRadiusMeters: Int = 300,
     val participants: List<Participant> = DEFAULT_PARTICIPANTS,
     val pages: List<BookPage> = emptyList(),
 )
@@ -49,3 +56,25 @@ data class Book(
 val DEFAULT_PARTICIPANTS = listOf(
     "Emmanuel", "Gaëlle", "Albéric", "Maylis", "Victor", "Juliette", "Charlotte",
 ).map { Participant(id = "p-" + it.lowercase(), name = it) }
+
+/** Distance en mètres entre deux points GPS (formule de haversine). */
+fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val r = 6_371_000.0
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = sin(dLat / 2).pow(2) + cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
+    return 2 * r * asin(sqrt(a))
+}
+
+/**
+ * Deux photos sont « voisines » si elles ont été prises à moins de [radiusMeters] l'une de
+ * l'autre ; sans GPS, si elles ont été prises à moins de 20 minutes d'intervalle.
+ */
+fun BookPage.isNear(other: BookPage, radiusMeters: Int): Boolean {
+    if (latitude != null && longitude != null && other.latitude != null && other.longitude != null) {
+        return distanceMeters(latitude, longitude, other.latitude, other.longitude) <= radiusMeters
+    }
+    val t1 = takenAt ?: return false
+    val t2 = other.takenAt ?: return false
+    return kotlin.math.abs(t1 - t2) <= 20 * 60 * 1000L
+}

@@ -4,6 +4,7 @@ import android.content.Context
 import fr.voyage.livre.data.AnnotationStatus
 import fr.voyage.livre.data.Book
 import fr.voyage.livre.data.BookPage
+import fr.voyage.livre.data.isNear
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -28,6 +29,13 @@ class Annotator(private val context: Context) {
             }
         }.getOrDefault(emptyList())
 
+        // Photos voisines déjà légendées : on ne répète pas ce qui y est déjà dit.
+        val neighbours = book.pages.filter {
+            it.id != page.id && it.status == AnnotationStatus.DONE &&
+                it.summary.isNotBlank() && page.isNear(it, book.groupRadiusMeters)
+        }
+        val usedArticles = neighbours.map { it.wikiTitle }.filter { it.isNotBlank() }.toSet()
+
         val caption = captioner?.let { claude ->
             val bitmap = PhotoImporter.decodeFileScaled(page.photoPath, 1568)
                 ?: error("Photo introuvable")
@@ -38,22 +46,27 @@ class Annotator(private val context: Context) {
                 guessedPlace = address,
                 gps = if (lat != null && lon != null) "%.5f, %.5f".format(Locale.US, lat, lon) else null,
                 articles = articles,
+                neighbourCaptions = neighbours.map { "${it.place} : ${it.summary}" },
             )
         }
 
-        val best = articles.firstOrNull()
+        // Sans Claude : on évite de reprendre un article déjà cité juste à côté.
+        val best = articles.firstOrNull { it.title !in usedArticles }
+        val repeatsNeighbour = best == null && articles.isNotEmpty()
         val place = caption?.place?.takeIf { it.isNotBlank() }
             ?: address
             ?: best?.title
+            ?: neighbours.firstOrNull()?.place
+            ?: articles.firstOrNull()?.title
             ?: page.place
         val summary = caption?.summary
             ?: best?.let { WikipediaClient.firstSentences(it.extract) }
-            ?: page.summary
+            ?: if (repeatsNeighbour) "" else page.summary
 
         return page.copy(
             place = place,
             summary = summary,
-            wikiTitle = best?.title.orEmpty(),
+            wikiTitle = (best ?: articles.firstOrNull())?.title.orEmpty(),
             status = AnnotationStatus.DONE,
             error = if (caption == null && captioner != null) "Claude n'a pas répondu : texte repris de Wikipédia." else null,
         )

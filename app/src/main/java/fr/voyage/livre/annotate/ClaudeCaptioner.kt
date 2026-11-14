@@ -38,6 +38,7 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
         guessedPlace: String?,
         gps: String?,
         articles: List<WikiArticle>,
+        neighbourCaptions: List<String> = emptyList(),
     ): Caption? = withContext(Dispatchers.IO) {
         val jpeg = ByteArrayOutputStream().use { out ->
             photo.compress(Bitmap.CompressFormat.JPEG, 85, out)
@@ -56,7 +57,7 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
             .addUserMessageOfContentBlockParams(
                 listOf(
                     ContentBlockParam.ofImage(image),
-                    ContentBlockParam.ofText(context(destination, dateText, guessedPlace, gps, articles)),
+                    ContentBlockParam.ofText(context(destination, dateText, guessedPlace, gps, articles, neighbourCaptions)),
                 )
             )
             .build()
@@ -90,6 +91,7 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
         guessedPlace: String?,
         gps: String?,
         articles: List<WikiArticle>,
+        neighbourCaptions: List<String>,
     ): String = buildString {
         appendLine("Voyage : $destination")
         dateText?.let { appendLine("Date de la photo : $it") }
@@ -106,6 +108,11 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
                 appendLine(a.extract.take(2500))
                 appendLine("</article>")
             }
+        }
+        if (neighbourCaptions.isNotEmpty()) {
+            appendLine()
+            appendLine("Légendes déjà écrites pour des photos prises au même endroit (ne pas les répéter) :")
+            neighbourCaptions.forEach { appendLine("- $it") }
         }
         appendLine()
         append("Rédige la légende de cette photo.")
@@ -139,6 +146,11 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
             Appuie-toi sur les extraits fournis et sur des faits sûrs ; si tu n'es pas certain du
             lieu exact, reste sur ce qui se voit et sur la région, sans inventer de nom ni de date.
             Ne parle pas des personnes présentes sur la photo : elles sont ajoutées à part.
+
+            Le livre est lu d'une traite : quand des photos voisines ont déjà une légende, ne
+            redis pas leur histoire. Écris plutôt une seule phrase sur ce que cette photo ajoute
+            (un détail visible, un autre point de vue, un aspect du lieu pas encore évoqué).
+            Pour le LIEU, reprends le même nom si c'est le même endroit.
 
             Réponds exactement sous cette forme, sans rien d'autre :
             LIEU : <nom court du lieu, puis la commune>
