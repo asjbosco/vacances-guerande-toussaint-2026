@@ -1,0 +1,51 @@
+name: Construire l'application
+
+# Compile l'APK à chaque fusion sur main (et vérifie chaque pull request).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Compiler l'APK
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Renommer l'APK
+        run: cp app/build/outputs/apk/release/app-release.apk LivreDeVoyage.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LivreDeVoyage
+          path: LivreDeVoyage.apk
+
+      # Après une fusion sur main : publie l'APK dans « Releases »,
+      # pour pouvoir le télécharger directement depuis le téléphone.
+      - name: Publier une version
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Livre de voyage ${{ github.run_number }}
+          files: LivreDeVoyage.apk
