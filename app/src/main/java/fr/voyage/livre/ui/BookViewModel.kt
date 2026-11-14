@@ -15,6 +15,7 @@ import fr.voyage.livre.data.BookPage
 import fr.voyage.livre.data.BookRepository
 import fr.voyage.livre.data.Participant
 import fr.voyage.livre.data.Settings
+import fr.voyage.livre.share.PdfExporter
 import fr.voyage.livre.share.ShareHelper
 import fr.voyage.livre.share.ShareTarget
 import kotlinx.coroutines.Job
@@ -229,6 +230,20 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(busyMessage = "Préparation des images…") }
             runCatching { ShareHelper.share(getApplication(), book, pages, target) }
                 .onFailure { say("Partage impossible : ${it.message}") }
+            _state.update { it.copy(busyMessage = null) }
+        }
+    }
+
+    /** Fabrique le livre en PDF imprimable (A4) puis propose de l'enregistrer ou de l'envoyer. */
+    fun exportPdf() {
+        val book = _state.value.book
+        if (book.pages.isEmpty()) { say("Aucune photo dans le livre."); return }
+        viewModelScope.launch {
+            _state.update { it.copy(busyMessage = "Fabrication du PDF…") }
+            runCatching {
+                val file = PdfExporter.export(getApplication(), book, book.pages)
+                PdfExporter.share(getApplication(), file, book)
+            }.onFailure { say("PDF impossible : ${it.message}") }
             _state.update { it.copy(busyMessage = null) }
         }
     }

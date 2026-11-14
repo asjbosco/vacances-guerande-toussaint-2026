@@ -19,6 +19,10 @@ chaque photo reçoit le **lieu**, un **court texte historique ou géographique**
 5. **Partager** – WhatsApp, Facebook (profil ou Page) ou toute autre application.
    Chaque photo est envoyée avec sa légende **incrustée en dessous**, pour que le texte
    reste visible même là où l'application ne reprend pas les légendes (Facebook).
+6. **Livre PDF imprimable** – dans « Partager », le bouton *Livre PDF imprimable* fabrique
+   tout le livre au format A4 : une couverture (titre, dates, participants, première photo),
+   puis une page par photo avec le lieu, la date, le texte et « Avec … ». On peut ensuite
+   l'enregistrer (Drive, Fichiers), l'envoyer ou l'imprimer.
 
 ## Installer l'application sur le téléphone
 

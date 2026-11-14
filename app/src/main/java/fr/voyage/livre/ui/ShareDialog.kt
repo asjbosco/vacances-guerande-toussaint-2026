@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -15,7 +17,7 @@ import androidx.compose.ui.unit.dp
 import fr.voyage.livre.share.ShareTarget
 
 @Composable
-fun ShareDialog(onDismiss: () -> Unit, onChoose: (ShareTarget) -> Unit) {
+fun ShareDialog(onDismiss: () -> Unit, onPdf: (() -> Unit)? = null, onChoose: (ShareTarget) -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Partager") },
@@ -33,6 +35,16 @@ fun ShareDialog(onDismiss: () -> Unit, onChoose: (ShareTarget) -> Unit) {
                 }
                 OutlinedButton(onClick = { onChoose(ShareTarget.OTHER) }, modifier = Modifier.fillMaxWidth()) {
                     Text("Autre application…")
+                }
+                if (onPdf != null) {
+                    HorizontalDivider()
+                    Text(
+                        "Ou tout le livre en un seul PDF à imprimer : couverture, photos et légendes.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    FilledTonalButton(onClick = onPdf, modifier = Modifier.fillMaxWidth()) {
+                        Text("Livre PDF imprimable")
+                    }
                 }
             }
         },

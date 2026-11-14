@@ -147,7 +147,10 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
     }
 
     if (showShare) {
-        ShareDialog(onDismiss = { showShare = false }) { target ->
+        ShareDialog(
+            onDismiss = { showShare = false },
+            onPdf = { showShare = false; vm.exportPdf() },
+        ) { target ->
             showShare = false
             vm.share(target)
         }
