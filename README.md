@@ -75,7 +75,7 @@ Dans une histoire :
 
 ## Technique
 
-Kotlin, Jetpack Compose, SDK Java officiel d'Anthropic (modèle `claude-opus-5-5`),
+Kotlin, Jetpack Compose, API Claude d'Anthropic en appel HTTPS direct (modèle `claude-opus-5-5`),
 API Wikipédia, Geocoder Android, ML Kit (détection des visages) et modèle FaceNet en
 TensorFlow Lite (empreinte des visages). Android 8.0 minimum.
 

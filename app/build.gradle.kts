@@ -88,8 +88,6 @@ dependencies {
     // PDF : photos intégrées en JPEG haute définition
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
 
-    // SDK officiel Anthropic (Claude)
-    implementation("com.anthropic:anthropic-java:3.3.0")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.3")
 }

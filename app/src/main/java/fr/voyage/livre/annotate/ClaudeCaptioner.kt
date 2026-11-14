@@ -2,21 +2,15 @@ package fr.voyage.livre.annotate
 
 import android.graphics.Bitmap
 import android.util.Base64
-import com.anthropic.client.AnthropicClient
-import com.anthropic.client.okhttp.AnthropicOkHttpClient
-import com.anthropic.errors.AnthropicIoException
-import com.anthropic.errors.BadRequestException
-import com.anthropic.errors.PermissionDeniedException
-import com.anthropic.errors.RateLimitException
-import com.anthropic.errors.UnauthorizedException
-import com.anthropic.models.messages.Base64ImageSource
-import com.anthropic.models.messages.ContentBlockParam
-import com.anthropic.models.messages.MessageCreateParams
-import com.anthropic.models.messages.OutputConfig
-import com.anthropic.models.messages.StopReason
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
 
 data class Caption(val place: String, val summary: String)
 
@@ -24,12 +18,13 @@ data class Caption(val place: String, val summary: String)
 class CaptionException(message: String) : Exception(message)
 
 /**
- * Demande à Claude le lieu et un court texte historique ou géographique pour une photo,
- * à partir de l'image elle-même et des articles Wikipédia proches.
+ * Demande à Claude le lieu et un court texte pour une photo, à partir de sa localisation,
+ * des articles Wikipédia proches et de l'image.
+ *
+ * Appel direct de l'API (simple requête HTTPS, comme pour Wikipédia) : la bibliothèque
+ * Java d'Anthropic, pensée pour les serveurs, faisait fermer l'application sur Android.
  */
-class ClaudeCaptioner(apiKey: String) : AutoCloseable {
-
-    private val client: AnthropicClient = AnthropicOkHttpClient.builder().apiKey(apiKey).build()
+class ClaudeCaptioner(private val apiKey: String) : AutoCloseable {
 
     suspend fun caption(
         photo: Bitmap,
@@ -45,45 +40,78 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
             photo.compress(Bitmap.CompressFormat.JPEG, 85, out)
             out.toByteArray()
         }
-        val image = Base64ImageSource.builder()
-            .data(Base64.encodeToString(jpeg, Base64.NO_WRAP))
-            .mediaType(Base64ImageSource.MediaType.IMAGE_JPEG)
-            .build()
-
-        val params = MessageCreateParams.builder()
-            .model(MODEL)
-            .maxTokens(4000L)
-            .system(SYSTEM_PROMPT)
-            .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.LOW).build())
-            .addUserMessageOfContentBlockParams(
-                listOf(
-                    ContentBlockParam.ofImage(image),
-                    ContentBlockParam.ofText(context(destination, dateText, address, userPlace, gps, articles, neighbourCaptions)),
+        val body = JSONObject().apply {
+            put("model", MODEL)
+            put("max_tokens", 4000)
+            put("system", SYSTEM_PROMPT)
+            put("output_config", JSONObject().put("effort", "low"))
+            put("messages", JSONArray().put(JSONObject().apply {
+                put("role", "user")
+                put("content", JSONArray()
+                    .put(JSONObject().apply {
+                        put("type", "image")
+                        put("source", JSONObject().apply {
+                            put("type", "base64")
+                            put("media_type", "image/jpeg")
+                            put("data", Base64.encodeToString(jpeg, Base64.NO_WRAP))
+                        })
+                    })
+                    .put(JSONObject().apply {
+                        put("type", "text")
+                        put("text", context(destination, dateText, address, userPlace, gps, articles, neighbourCaptions))
+                    })
                 )
-            )
-            .build()
+            }))
+        }.toString()
 
-        val message = try {
-            client.messages().create(params)
-        } catch (e: UnauthorizedException) {
-            throw CaptionException("Clé API refusée : vérifiez-la dans les réglages.")
-        } catch (e: PermissionDeniedException) {
-            throw CaptionException("Cette clé API n'a pas accès à Claude.")
-        } catch (e: RateLimitException) {
-            throw CaptionException("Trop de demandes d'un coup : réessayez dans une minute.")
-        } catch (e: BadRequestException) {
-            throw CaptionException("Demande refusée par Claude : ${e.message}")
-        } catch (e: AnthropicIoException) {
-            throw CaptionException("Pas de connexion Internet.")
-        }
-
+        val response = send(body)
         // Claude peut décliner certaines demandes : on se rabat alors sur Wikipédia.
-        if (message.stopReason().orElse(null) == StopReason.REFUSAL) return@withContext null
-
-        val text = message.content()
-            .mapNotNull { it.text().orElse(null)?.text() }
-            .joinToString("\n")
+        if (response.optString("stop_reason") == "refusal") return@withContext null
+        val blocks = response.optJSONArray("content") ?: JSONArray()
+        val text = (0 until blocks.length())
+            .map { blocks.getJSONObject(it) }
+            .filter { it.optString("type") == "text" }
+            .joinToString("\n") { it.optString("text") }
         parse(text)
+    }
+
+    /** Envoie la requête ; réessaie une fois si le service est surchargé. */
+    private suspend fun send(body: String): JSONObject {
+        repeat(2) { attempt ->
+            val conn = (URL(API_URL).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 20_000
+                readTimeout = 120_000
+                setRequestProperty("content-type", "application/json")
+                setRequestProperty("x-api-key", apiKey)
+                setRequestProperty("anthropic-version", API_VERSION)
+            }
+            try {
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (code in 200..299) return JSONObject(text)
+
+                val apiMessage = runCatching { JSONObject(text).getJSONObject("error").optString("message") }.getOrNull()
+                when {
+                    code == 401 -> throw CaptionException("Clé API refusée : vérifiez-la dans les réglages.")
+                    code == 403 -> throw CaptionException("Cette clé API n'a pas accès à Claude.")
+                    code == 400 && apiMessage?.contains("credit", ignoreCase = true) == true ->
+                        throw CaptionException("Crédit Anthropic épuisé : ajoutez du crédit sur console.anthropic.com.")
+                    code == 400 -> throw CaptionException("Demande refusée par Claude : ${apiMessage ?: code}")
+                    (code == 429 || code >= 500) && attempt == 0 -> delay(5_000)
+                    code == 429 -> throw CaptionException("Trop de demandes d'un coup : réessayez dans une minute.")
+                    else -> throw CaptionException("Claude est momentanément indisponible (erreur $code).")
+                }
+            } catch (e: IOException) {
+                throw CaptionException("Pas de connexion Internet, ou Claude injoignable.")
+            } finally {
+                conn.disconnect()
+            }
+        }
+        throw CaptionException("Claude est momentanément indisponible.")
     }
 
     private fun context(
@@ -129,10 +157,12 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
         return Caption(place.orEmpty(), summary)
     }
 
-    override fun close() = client.close()
+    override fun close() = Unit
 
     companion object {
         const val MODEL = "claude-opus-5-5"
+        private const val API_URL = "https://api.anthropic.com/v1/messages"
+        private const val API_VERSION = "2026-10-21"
 
         private val SYSTEM_PROMPT = """
             Tu rédiges les légendes d'un livre-souvenir de voyage, en français.
