@@ -1,24 +1,30 @@
 package fr.voyage.livre.data
 
 import kotlinx.serialization.Serializable
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
-import java.util.UUID
 
+/** Un proche (famille, amis), commun à toutes les histoires. */
 @Serializable
 data class Participant(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val description: String = "",
-    /** Faisait partie du voyage (affiché sur la couverture) ; sinon simple proche reconnu sur les photos. */
-    val onTrip: Boolean = true,
 )
 
 @Serializable
 enum class AnnotationStatus { TODO, RUNNING, DONE, ERROR }
+
+/** D'où viennent les légendes. */
+@Serializable
+enum class CaptionSource { WIKIPEDIA, CLAUDE }
 
 @Serializable
 data class BookPage(
@@ -30,7 +36,11 @@ data class BookPage(
     val takenAt: Long? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
+    /** Ligne en gras : le lieu précis s'il est connu, sinon la ville ou le village. */
     val place: String = "",
+    /** Le lieu a été saisi par vous (photo sans GPS) : il sert de base à la légende. */
+    val placeByUser: Boolean = false,
+    /** Texte court (2 lignes, style télégraphique). */
     val summary: String = "",
     val wikiTitle: String = "",
     val participantIds: List<String> = emptyList(),
@@ -40,26 +50,44 @@ data class BookPage(
     val facesScanned: Boolean = false,
 ) {
     val hasGps: Boolean get() = latitude != null && longitude != null
+
+    /** Sans GPS, il faut que vous indiquiez le lieu ou le nom de la photo. */
+    val needsPlace: Boolean get() = !hasGps && place.isBlank()
 }
 
+/** Une histoire (un voyage, une fête…) : son propre livre et ses propres photos. */
 @Serializable
 data class Book(
-    val title: String = "Vacances à Guérande – Toussaint 2026",
-    /** Région du voyage : aide à retrouver le lieu quand une photo n'a pas de GPS. */
-    val destination: String = "Guérande et la presqu'île guérandaise (Loire-Atlantique)",
-    /** Dates au format jj/mm/aaaa, utilisées pour filtrer la galerie. */
-    val startDate: String = "17/10/2026",
-    val endDate: String = "02/11/2026",
+    val id: String = UUID.randomUUID().toString(),
+    val title: String = "Nouvelle histoire",
+    /** Région du voyage : aide à retrouver les articles Wikipédia. */
+    val destination: String = "",
+    /** Les proches qui ont participé (affichés sur la couverture). */
+    val travelerIds: List<String> = emptyList(),
     /** Deux photos plus proches que cette distance partagent le même contexte historique. */
     val groupRadiusMeters: Int = 300,
-    val participants: List<Participant> = DEFAULT_PARTICIPANTS,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
     val pages: List<BookPage> = emptyList(),
 ) {
-    /** Les personnes du voyage (couverture du livre). */
-    val travelers: List<Participant> get() = participants.filter { it.onTrip }
+    fun travelers(people: List<Participant>): List<Participant> = people.filter { it.id in travelerIds }
+
+    /** « 18 – 29 octobre 2026 », d'après les dates des photos. */
+    val dateRange: String
+        get() {
+            val dates = pages.mapNotNull { it.takenAt }
+            if (dates.isEmpty()) return ""
+            val first = Date(dates.min())
+            val last = Date(dates.max())
+            val day = SimpleDateFormat("d MMMM yyyy", Locale.FRANCE)
+            if (day.format(first) == day.format(last)) return day.format(first)
+            val sameMonth = SimpleDateFormat("MM yyyy", Locale.FRANCE).let { it.format(first) == it.format(last) }
+            val start = SimpleDateFormat(if (sameMonth) "d" else "d MMMM", Locale.FRANCE).format(first)
+            return "$start – ${day.format(last)}"
+        }
 }
 
-/** Les voyageurs de Guérande, Toussaint 2026 (modifiables dans les réglages). */
+/** Les sept voyageurs de Guérande, proposés au premier lancement. */
 val DEFAULT_PARTICIPANTS = listOf(
     "Emmanuel", "Gaëlle", "Albéric", "Maylis", "Victor", "Juliette", "Charlotte",
 ).map { Participant(id = "p-" + it.lowercase(), name = it) }
@@ -75,18 +103,16 @@ fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Doub
 
 /**
  * Deux photos sont « voisines » si elles ont été prises à moins de [radiusMeters] l'une de
- * l'autre ; sans GPS, si elles ont été prises à moins de 20 minutes d'intervalle.
+ * l'autre ; sans GPS, si vous leur avez donné le même lieu.
  */
 fun BookPage.isNear(other: BookPage, radiusMeters: Int): Boolean {
     if (latitude != null && longitude != null && other.latitude != null && other.longitude != null) {
         return distanceMeters(latitude, longitude, other.latitude, other.longitude) <= radiusMeters
     }
-    val t1 = takenAt ?: return false
-    val t2 = other.takenAt ?: return false
-    return kotlin.math.abs(t1 - t2) <= 20 * 60 * 1000L
+    return place.isNotBlank() && place.trim().equals(other.place.trim(), ignoreCase = true)
 }
 
-/** Un visage repéré sur une photo du livre. */
+/** Un visage repéré sur une photo. */
 @Serializable
 data class FaceRecord(
     val id: String = UUID.randomUUID().toString(),

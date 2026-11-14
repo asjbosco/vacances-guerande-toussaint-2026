@@ -20,6 +20,8 @@ import fr.voyage.livre.annotate.Annotator
 import fr.voyage.livre.annotate.PhotoImporter
 import fr.voyage.livre.data.Book
 import fr.voyage.livre.data.BookPage
+import fr.voyage.livre.data.CaptionFormat
+import fr.voyage.livre.data.Participant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -45,13 +47,13 @@ object PdfExporter {
     private val MUTED = Color.rgb(110, 110, 110)
     private val PAPER = Color.rgb(251, 247, 240)
 
-    suspend fun export(context: Context, book: Book, pages: List<BookPage>): File = withContext(Dispatchers.IO) {
+    suspend fun export(context: Context, book: Book, pages: List<BookPage>, people: List<Participant>): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "partage").apply { mkdirs() }
         val file = File(dir, fileName(book))
         val doc = PdfDocument()
         try {
-            drawCover(doc, book, pages)
-            pages.forEachIndexed { i, page -> drawPhotoPage(doc, book, page, i + 2) }
+            drawCover(doc, book, pages, book.travelers(people))
+            pages.forEachIndexed { i, page -> drawPhotoPage(doc, page, people, i + 2) }
             FileOutputStream(file).use { doc.writeTo(it) }
         } finally {
             doc.close()
@@ -85,7 +87,7 @@ object PdfExporter {
 
     // ---------- Couverture ----------
 
-    private fun drawCover(doc: PdfDocument, book: Book, pages: List<BookPage>) {
+    private fun drawCover(doc: PdfDocument, book: Book, pages: List<BookPage>, travelers: List<Participant>) {
         val pdfPage = doc.startPage(PdfDocument.PageInfo.Builder(PAGE_W, PAGE_H, 1).create())
         val canvas = pdfPage.canvas
         canvas.drawColor(PAPER)
@@ -107,7 +109,7 @@ object PdfExporter {
             y = drawText(canvas, book.destination, serif(15f, color = INK), MARGIN, y, width, Layout.Alignment.ALIGN_CENTER)
             y += 6f
         }
-        val dates = listOf(book.startDate, book.endDate).filter { it.isNotBlank() }.joinToString(" – ")
+        val dates = book.dateRange
         if (dates.isNotBlank()) {
             y = drawText(canvas, dates, sans(12f, italic = true, color = MUTED), MARGIN, y, width, Layout.Alignment.ALIGN_CENTER)
         }
@@ -118,8 +120,8 @@ object PdfExporter {
         canvas.drawLine(PAGE_W / 2f - 60f, y, PAGE_W / 2f + 60f, y, line)
         y += 22f
 
-        if (book.travelers.isNotEmpty()) {
-            val names = book.travelers.joinToString(", ") { it.name }
+        if (travelers.isNotEmpty()) {
+            val names = travelers.joinToString(", ") { it.name }
             drawText(canvas, "Avec $names", serif(13f, color = INK), MARGIN, y, width, Layout.Alignment.ALIGN_CENTER)
         }
 
@@ -132,19 +134,18 @@ object PdfExporter {
 
     // ---------- Pages photo ----------
 
-    private fun drawPhotoPage(doc: PdfDocument, book: Book, page: BookPage, number: Int) {
+    private fun drawPhotoPage(doc: PdfDocument, page: BookPage, people: List<Participant>, number: Int) {
         val pdfPage = doc.startPage(PdfDocument.PageInfo.Builder(PAGE_W, PAGE_H, number).create())
         val canvas = pdfPage.canvas
         canvas.drawColor(Color.WHITE)
         val width = (PAGE_W - 2 * MARGIN).toInt()
 
         // Texte d'abord mesuré, pour laisser à la photo toute la place restante.
-        val names = book.participants.filter { it.id in page.participantIds }.map { it.name }
+        // Lieu en gras, texte (2 lignes au plus), puis la date et les personnes.
         val blocks = listOfNotNull(
-            layout(page.place, serif(18f, bold = true, color = ACCENT), width),
-            page.takenAt?.let { layout(Annotator.formatDate(it).replaceFirstChar(Char::uppercase), sans(10f, italic = true, color = MUTED), width) },
-            layout(page.summary, serif(12f, color = INK), width),
-            names.takeIf { it.isNotEmpty() }?.let { layout("Avec ${it.joinToString(", ")}", serif(12f, italic = true, color = INK), width) },
+            layout(page.place, serif(18f, bold = true, color = ACCENT), width, maxLines = 2),
+            layout(page.summary, serif(12f, color = INK), width, maxLines = 2),
+            layout(CaptionFormat.footer(page, people), sans(10f, italic = true, color = MUTED), width),
         )
         val gap = 8f
         val footerSpace = 24f
@@ -192,11 +193,16 @@ object PdfExporter {
         canvas.drawBitmap(photo, src, dst, Paint(Paint.FILTER_BITMAP_FLAG))
     }
 
-    private fun layout(text: String, paint: TextPaint, width: Int, align: Layout.Alignment = Layout.Alignment.ALIGN_NORMAL): StaticLayout? =
+    private fun layout(
+        text: String, paint: TextPaint, width: Int,
+        align: Layout.Alignment = Layout.Alignment.ALIGN_NORMAL, maxLines: Int = Int.MAX_VALUE,
+    ): StaticLayout? =
         text.takeIf { it.isNotBlank() }?.let {
             StaticLayout.Builder.obtain(it, 0, it.length, paint, width)
                 .setAlignment(align)
                 .setLineSpacing(0f, 1.2f)
+                .setMaxLines(maxLines)
+                .setEllipsize(android.text.TextUtils.TruncateAt.END)
                 .build()
         }
 

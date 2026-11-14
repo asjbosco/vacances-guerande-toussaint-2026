@@ -100,7 +100,7 @@ fun FacesScreen(state: UiState, vm: BookViewModel) {
             HorizontalDivider()
             Text("C'est…", style = MaterialTheme.typography.titleMedium)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                state.book.participants.forEach { p ->
+                state.people.forEach { p ->
                     AssistChip(onClick = { vm.nameCluster(cluster, p.id) }, label = { Text(p.name) })
                 }
             }

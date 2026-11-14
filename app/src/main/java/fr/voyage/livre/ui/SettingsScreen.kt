@@ -12,9 +12,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -24,10 +24,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -35,28 +37,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import fr.voyage.livre.data.Participant
 
+/** Réglages communs à toutes les histoires : proches, clé API. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(state: UiState, vm: BookViewModel) {
-    val book = state.book
-    var title by rememberSaveable { mutableStateOf(book.title) }
-    var destination by rememberSaveable { mutableStateOf(book.destination) }
-    var start by rememberSaveable { mutableStateOf(book.startDate) }
-    var end by rememberSaveable { mutableStateOf(book.endDate) }
-    var radius by rememberSaveable { mutableStateOf(book.groupRadiusMeters.toString()) }
     var newName by rememberSaveable { mutableStateOf("") }
     var newDescription by rememberSaveable { mutableStateOf("") }
-    var newOnTrip by rememberSaveable { mutableStateOf(false) }
     var apiKey by rememberSaveable { mutableStateOf("") }
+    var toRemove by remember { mutableStateOf<Participant?>(null) }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Réglages") },
-                navigationIcon = {
-                    IconButton(onClick = { vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") }
-                },
+                navigationIcon = { IconButton(onClick = { vm.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Retour") } },
             )
         },
         snackbarHost = { MessageHost(state, vm) },
@@ -65,50 +61,19 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
             Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("Le voyage", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(title, { title = it }, label = { Text("Titre du livre") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(
-                destination, { destination = it }, label = { Text("Région visitée") },
-                supportingText = { Text("Aide à reconnaître les lieux des photos sans GPS") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    start, { start = it }, label = { Text("Du (jj/mm/aaaa)") }, singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedTextField(
-                    end, { end = it }, label = { Text("Au (jj/mm/aaaa)") }, singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            OutlinedTextField(
-                radius, { radius = it.filter(Char::isDigit) },
-                label = { Text("Photos voisines : distance (mètres)") },
-                supportingText = { Text("En dessous de cette distance, l'histoire du lieu n'est racontée qu'une fois") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(onClick = { vm.saveBookInfo(title, destination, start, end, radius) }) { Text("Enregistrer") }
-
-            HorizontalDivider()
             Text("Famille et proches", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Cochez « Du voyage » pour les personnes qui figurent sur la couverture. " +
-                    "Les autres proches peuvent être reconnus sur les photos.",
+                "Liste commune à toutes vos histoires. Les visages nommés sont reconnus d'une histoire à l'autre.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            book.participants.forEach { p ->
+            state.people.forEach { p ->
                 Card(Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f).padding(vertical = 10.dp)) {
                             Text(p.name, style = MaterialTheme.typography.bodyLarge)
                             if (p.description.isNotBlank()) Text(p.description, style = MaterialTheme.typography.bodySmall)
                         }
-                        Text("Du voyage", style = MaterialTheme.typography.labelSmall)
-                        Checkbox(checked = p.onTrip, onCheckedChange = { vm.setOnTrip(p.id, it) })
-                        IconButton(onClick = { vm.removeParticipant(p.id) }) { Icon(Icons.Default.Close, "Retirer ${p.name}") }
+                        IconButton(onClick = { toRemove = p }) { Icon(Icons.Default.Close, "Retirer ${p.name}") }
                     }
                 }
             }
@@ -117,22 +82,24 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
                 newDescription, { newDescription = it }, label = { Text("Surnom ou description (facultatif)") },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = newOnTrip, onCheckedChange = { newOnTrip = it })
-                Text("Faisait partie du voyage")
-            }
             OutlinedButton(
-                onClick = { vm.addParticipant(newName, newDescription, newOnTrip); newName = ""; newDescription = "" },
+                onClick = { vm.addPerson(newName, newDescription); newName = ""; newDescription = "" },
                 enabled = newName.isNotBlank(),
             ) { Text("Ajouter cette personne") }
 
             HorizontalDivider()
-            Text("Claude (rédaction des légendes)", style = MaterialTheme.typography.titleMedium)
+            Text("D'où viennent les légendes ?", style = MaterialTheme.typography.titleMedium)
             Text(
-                if (state.apiKeySet) "✅ Une clé API est enregistrée sur ce téléphone."
-                else "Sans clé, les textes sont repris tels quels de Wikipédia. " +
-                    "Créez une clé sur console.anthropic.com (rubrique API Keys).",
+                "La question vous est posée à chaque rédaction. Dans les deux cas, la légende part de la " +
+                    "position GPS de la photo ; sans GPS, du lieu que vous indiquez.\n" +
+                    "• Sources libres : texte repris et raccourci de Wikipédia, gratuit, rien n'est envoyé à part le lieu.\n" +
+                    "• Claude (Anthropic) : la photo et les articles du lieu sont envoyés à Claude, qui rédige le texte. " +
+                    "Clé API nécessaire (console.anthropic.com, rubrique API Keys), ~1 centime par photo.",
                 style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                if (state.apiKeySet) "✅ Une clé API Claude est enregistrée sur ce téléphone." else "Aucune clé API Claude enregistrée.",
+                style = MaterialTheme.typography.bodyMedium,
             )
             OutlinedTextField(
                 apiKey, { apiKey = it.trim() },
@@ -143,13 +110,19 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.saveApiKey(apiKey); apiKey = "" }, enabled = apiKey.isNotBlank()) {
-                    Text("Enregistrer la clé")
-                }
-                if (state.apiKeySet) {
-                    OutlinedButton(onClick = { vm.saveApiKey("") }) { Text("Effacer") }
-                }
+                Button(onClick = { vm.saveApiKey(apiKey); apiKey = "" }, enabled = apiKey.isNotBlank()) { Text("Enregistrer la clé") }
+                if (state.apiKeySet) OutlinedButton(onClick = { vm.saveApiKey("") }) { Text("Effacer") }
             }
         }
+    }
+
+    toRemove?.let { p ->
+        AlertDialog(
+            onDismissRequest = { toRemove = null },
+            title = { Text("Retirer ${p.name} ?") },
+            text = { Text("${p.name} disparaît de la liste et des photos où la personne était cochée.") },
+            confirmButton = { TextButton(onClick = { toRemove = null; vm.removePerson(p.id) }) { Text("Retirer") } },
+            dismissButton = { TextButton(onClick = { toRemove = null }) { Text("Annuler") } },
+        )
     }
 }

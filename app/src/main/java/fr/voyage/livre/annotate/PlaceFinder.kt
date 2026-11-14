@@ -7,22 +7,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-/** Traduit des coordonnées GPS en nom de lieu lisible (« Rue de la Psalette, Guérande »). */
+/** Adresse d'un point GPS : un nom précis (rue, lieu-dit) et la commune. */
+data class FoundPlace(val precise: String?, val town: String?) {
+    val label: String get() = listOfNotNull(precise, town).distinct().joinToString(", ")
+}
+
+/** Traduit des coordonnées GPS en adresse lisible. */
 object PlaceFinder {
 
-    suspend fun placeName(context: Context, lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
+    suspend fun find(context: Context, lat: Double, lon: Double): FoundPlace? = withContext(Dispatchers.IO) {
         if (!Geocoder.isPresent()) return@withContext null
         runCatching {
             @Suppress("DEPRECATION")
-            val address: Address? = Geocoder(context, Locale.FRANCE).getFromLocation(lat, lon, 1)?.firstOrNull()
-            address?.let { format(it) }
+            val a: Address? = Geocoder(context, Locale.FRANCE).getFromLocation(lat, lon, 1)?.firstOrNull()
+            a?.let {
+                val precise = listOfNotNull(it.featureName, it.thoroughfare)
+                    .firstOrNull { s -> s.isNotBlank() && s.any(Char::isLetter) }
+                FoundPlace(precise, it.locality ?: it.subLocality ?: it.subAdminArea)
+            }
         }.getOrNull()
-    }
-
-    private fun format(a: Address): String {
-        val near = listOfNotNull(a.featureName, a.thoroughfare)
-            .firstOrNull { it.isNotBlank() && it.any(Char::isLetter) }
-        val town = a.locality ?: a.subAdminArea
-        return listOfNotNull(near, town).distinct().joinToString(", ")
     }
 }

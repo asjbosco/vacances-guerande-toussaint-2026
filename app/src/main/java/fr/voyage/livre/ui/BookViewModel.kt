@@ -12,15 +12,16 @@ import fr.voyage.livre.annotate.PhotoImporter
 import fr.voyage.livre.data.AnnotationStatus
 import fr.voyage.livre.data.Book
 import fr.voyage.livre.data.BookPage
-import fr.voyage.livre.data.BookRepository
-import fr.voyage.livre.data.Participant
+import fr.voyage.livre.data.CaptionSource
 import fr.voyage.livre.data.FaceIndex
+import fr.voyage.livre.data.FaceRecord
+import fr.voyage.livre.data.LibraryRepository
+import fr.voyage.livre.data.Participant
 import fr.voyage.livre.data.Settings
 import fr.voyage.livre.faces.FaceCluster
 import fr.voyage.livre.faces.FaceMatcher
 import fr.voyage.livre.faces.FaceRecognizer
 import fr.voyage.livre.faces.FaceRepository
-import fr.voyage.livre.data.FaceRecord
 import fr.voyage.livre.share.PdfExporter
 import fr.voyage.livre.share.ShareHelper
 import fr.voyage.livre.share.ShareTarget
@@ -33,11 +34,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Locale
 
 sealed interface Screen {
-    data object Home : Screen
+    /** Liste des histoires. */
+    data object Library : Screen
+    /** Une histoire : ses photos et les étapes. */
+    data object Story : Screen
+    data object BookInfo : Screen
     data object Picker : Screen
     data class Editor(val pageId: String) : Screen
     data class Viewer(val startIndex: Int = 0) : Screen
@@ -46,67 +49,151 @@ sealed interface Screen {
 }
 
 data class UiState(
+    val books: List<Book> = emptyList(),
+    /** L'histoire ouverte (vide tant qu'aucune ne l'est). */
     val book: Book = Book(),
+    val people: List<Participant> = emptyList(),
     val loaded: Boolean = false,
-    val screen: Screen = Screen.Home,
+    val screen: Screen = Screen.Library,
     val galleryPhotos: List<GalleryPhoto> = emptyList(),
     val galleryLoading: Boolean = false,
     val busyMessage: String? = null,
     val message: String? = null,
     val apiKeySet: Boolean = false,
+    val captionSource: CaptionSource = CaptionSource.WIKIPEDIA,
+    /** Photos cochées pour une suppression groupée. */
+    val selectedPages: Set<String> = emptySet(),
+    /** Dernière photo ouverte : la liste y revient au retour. */
+    val lastPageId: String? = null,
     /** Groupes de visages inconnus restant à nommer. */
     val faceClusters: List<FaceCluster> = emptyList(),
-    /** Nombre de photos où des participants ont été cochés automatiquement pendant cette session. */
+    /** Nombre de photos où des proches ont été cochés automatiquement. */
     val facesTicked: Int = 0,
-)
+) {
+    val travelers: List<Participant> get() = book.travelers(people)
+}
 
 class BookViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val repo = BookRepository(app)
+    private val repo = LibraryRepository(app)
     private val settings = Settings(app)
     private val annotator = Annotator(app)
     private val faceRepo = FaceRepository(app)
     private var faceIndex = FaceIndex()
 
-    private val _state = MutableStateFlow(UiState(apiKeySet = settings.apiKey.isNotBlank()))
+    private val _state = MutableStateFlow(
+        UiState(apiKeySet = settings.apiKey.isNotBlank(), captionSource = settings.captionSource)
+    )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var annotateJob: Job? = null
 
     init {
         viewModelScope.launch {
-            val book = repo.load()
+            val books = repo.loadBooks()
+            val people = repo.loadPeople()
             faceIndex = faceRepo.load()
-            _state.update { it.copy(book = book, loaded = true) }
+            _state.update { it.copy(books = books, people = people, loaded = true) }
         }
     }
 
     // ---------- Navigation ----------
 
-    fun open(screen: Screen) = _state.update { it.copy(screen = screen) }
-    fun back() = open(Screen.Home)
+    /** Écran à retrouver en quittant les réglages. */
+    private var settingsReturn: Screen = Screen.Library
+
+    fun open(screen: Screen) = _state.update {
+        if (screen == Screen.Settings && it.screen != Screen.Settings) settingsReturn = it.screen
+        it.copy(screen = screen)
+    }
+
+    fun back() = _state.update {
+        val target = when (it.screen) {
+            Screen.Library, Screen.Story -> Screen.Library
+            Screen.Settings -> settingsReturn
+            else -> Screen.Story
+        }
+        it.copy(screen = target, selectedPages = if (target == Screen.Story) it.selectedPages else emptySet())
+    }
+
     fun clearMessage() = _state.update { it.copy(message = null) }
     private fun say(text: String) = _state.update { it.copy(message = text) }
 
     private fun editBook(transform: (Book) -> Book) {
-        _state.update { it.copy(book = transform(it.book)) }
+        _state.update { s ->
+            val updated = transform(s.book).copy(updatedAt = System.currentTimeMillis())
+            s.copy(book = updated, books = s.books.map { if (it.id == updated.id) updated else it })
+        }
         val snapshot = _state.value.book
-        viewModelScope.launch { repo.save(snapshot) }
+        viewModelScope.launch { repo.saveBook(snapshot) }
     }
 
     private fun editPage(id: String, transform: (BookPage) -> BookPage) = editBook { b ->
         b.copy(pages = b.pages.map { if (it.id == id) transform(it) else it })
     }
 
+    // ---------- Histoires ----------
+
+    fun openBook(id: String) {
+        val book = _state.value.books.firstOrNull { it.id == id } ?: return
+        _state.update {
+            it.copy(
+                book = book, screen = Screen.Story, selectedPages = emptySet(), lastPageId = null,
+                faceClusters = emptyList(), facesTicked = 0, galleryPhotos = emptyList(),
+            )
+        }
+    }
+
+    /** Nouvelle histoire : livre vide, aucune photo sélectionnée. */
+    fun createBook(title: String, destination: String, travelerIds: List<String>) {
+        val book = Book(
+            title = title.trim().ifBlank { "Nouvelle histoire" },
+            destination = destination.trim(),
+            travelerIds = travelerIds,
+        )
+        _state.update { it.copy(books = listOf(book) + it.books) }
+        viewModelScope.launch { repo.saveBook(book) }
+        openBook(book.id)
+        open(Screen.Picker)
+    }
+
+    fun duplicateBook(id: String) {
+        val book = _state.value.books.firstOrNull { it.id == id } ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(busyMessage = "Copie de l'histoire…") }
+            val copy = repo.duplicate(book, "${book.title} (copie)")
+            _state.update { it.copy(books = listOf(copy) + it.books, busyMessage = null) }
+            say("Copie créée : « ${copy.title} »")
+        }
+    }
+
+    fun deleteBook(id: String) {
+        val book = _state.value.books.firstOrNull { it.id == id } ?: return
+        _state.update { it.copy(books = it.books.filterNot { b -> b.id == id }) }
+        forgetFaces(book.pages.map { it.id }.toSet())
+        viewModelScope.launch { repo.deleteBook(book) }
+        say("Histoire supprimée")
+    }
+
+    fun saveBookInfo(title: String, destination: String, travelerIds: List<String>, radius: String) {
+        val meters = radius.trim().toIntOrNull()?.takeIf { it in 0..20_000 }
+            ?: run { say("Distance attendue en mètres (ex. 300)"); return }
+        editBook {
+            it.copy(
+                title = title.trim().ifBlank { it.title }, destination = destination.trim(),
+                travelerIds = travelerIds, groupRadiusMeters = meters,
+            )
+        }
+        say("Enregistré")
+        open(Screen.Story)
+    }
+
     // ---------- Galerie ----------
 
     fun loadGallery() {
-        val book = _state.value.book
-        val start = parseDate(book.startDate) ?: 0L
-        val end = (parseDate(book.endDate) ?: System.currentTimeMillis()) + DAY - 1
         _state.update { it.copy(galleryLoading = true) }
         viewModelScope.launch {
-            val photos = runCatching { Gallery.photosBetween(getApplication(), start, end) }
+            val photos = runCatching { Gallery.allPhotos(getApplication()) }
                 .getOrElse { say("Impossible de lire la galerie : ${it.message}"); emptyList() }
             _state.update { it.copy(galleryPhotos = photos, galleryLoading = false) }
         }
@@ -115,68 +202,81 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     fun addPhotos(selected: List<GalleryPhoto>) {
         val existing = _state.value.book.pages.map { it.sourceUri }.toSet()
         val toImport = selected.filter { it.uri.toString() !in existing }.sortedBy { it.takenAt }
-        open(Screen.Home)
+        open(Screen.Story)
         if (toImport.isEmpty()) return
         viewModelScope.launch {
-            var done = 0
             var noGps = 0
-            for (photo in toImport) {
-                _state.update { it.copy(busyMessage = "Import des photos… ${done + 1}/${toImport.size}") }
+            toImport.forEachIndexed { i, photo ->
+                _state.update { it.copy(busyMessage = "Import des photos… ${i + 1}/${toImport.size}") }
                 runCatching { PhotoImporter.import(getApplication(), photo.uri, photo.takenAt, repo.photosDir) }
                     .onSuccess { page ->
                         if (!page.hasGps) noGps++
                         editBook { b -> b.copy(pages = (b.pages + page).sortedBy { it.takenAt ?: Long.MAX_VALUE }) }
                     }
-                done++
             }
             _state.update { it.copy(busyMessage = null) }
-            if (noGps > 0) say("$noGps photo(s) sans position GPS : le lieu sera deviné d'après l'image.")
+            if (noGps > 0) say("$noGps photo(s) sans GPS : indiquez leur lieu ou leur nom (icône 📍 barrée).")
         }
     }
 
-    // ---------- Annotation ----------
+    // ---------- Légendes ----------
 
-    fun annotateAll(onlyMissing: Boolean = true) {
+    fun setCaptionSource(source: CaptionSource) {
+        settings.captionSource = source
+        _state.update { it.copy(captionSource = source) }
+    }
+
+    fun annotateAll(source: CaptionSource, onlyMissing: Boolean) {
         if (annotateJob?.isActive == true) return
+        setCaptionSource(source)
         if (!onlyMissing) {
             // On repart de zéro pour que les photos voisines ne se répètent pas.
             editBook { b -> b.copy(pages = b.pages.map { it.copy(status = AnnotationStatus.TODO) }) }
         }
-        val pages = _state.value.book.pages.filter {
-            !onlyMissing || it.status != AnnotationStatus.DONE
-        }
-        annotate(pages.map { it.id })
+        val pages = _state.value.book.pages.filter { !onlyMissing || it.status != AnnotationStatus.DONE }
+        annotate(pages.map { it.id }, source)
     }
 
-    fun annotateOne(pageId: String) = annotate(listOf(pageId))
+    fun annotateOne(pageId: String) = annotate(listOf(pageId), _state.value.captionSource)
 
-    private fun annotate(ids: List<String>) {
-        if (ids.isEmpty()) { say("Toutes les photos sont déjà annotées."); return }
+    private fun annotate(ids: List<String>, source: CaptionSource) {
+        if (ids.isEmpty()) { say("Toutes les photos ont déjà une légende."); return }
         if (annotateJob?.isActive == true) return
+        if (source == CaptionSource.CLAUDE && settings.apiKey.isBlank()) {
+            say("Pour Claude, enregistrez d'abord votre clé API dans les réglages ⚙️.")
+            return
+        }
         annotateJob = viewModelScope.launch {
-            val key = settings.apiKey
-            val captioner = key.takeIf { it.isNotBlank() }?.let { ClaudeCaptioner(it) }
-            if (captioner == null) say("Pas de clé API Claude : les textes viendront seulement de Wikipédia.")
+            val captioner = if (source == CaptionSource.CLAUDE) ClaudeCaptioner(settings.apiKey) else null
+            var missingPlace = 0
             try {
                 ids.forEachIndexed { i, id ->
                     val page = _state.value.book.pages.firstOrNull { it.id == id } ?: return@forEachIndexed
+                    if (page.needsPlace) {
+                        missingPlace++
+                        editPage(id) { it.copy(status = AnnotationStatus.ERROR, error = "Pas de position GPS : indiquez le lieu ou le nom de la photo.") }
+                        return@forEachIndexed
+                    }
                     _state.update { it.copy(busyMessage = "Rédaction des légendes… ${i + 1}/${ids.size}") }
                     editPage(id) { it.copy(status = AnnotationStatus.RUNNING, error = null) }
-                    val result = runCatching { annotator.annotate(page, _state.value.book, captioner) }
-                    result.onSuccess { updated ->
-                        // Garde les personnes cochées pendant l'annotation.
-                        editPage(id) { current -> updated.copy(participantIds = current.participantIds) }
-                    }.onFailure { e ->
-                        editPage(id) { it.copy(status = AnnotationStatus.ERROR, error = e.message) }
-                        if (e is CaptionException) {
-                            say(e.message ?: "Erreur")
-                            // Une clé invalide ou l'absence de réseau bloquerait toutes les photos.
-                            ids.drop(i + 1).forEach { rest -> editPage(rest) { it.copy(status = AnnotationStatus.TODO) } }
-                            return@launch
+                    runCatching { annotator.annotate(page, _state.value.book, captioner) }
+                        .onSuccess { updated ->
+                            // Garde les personnes cochées et le lieu saisi pendant l'annotation.
+                            editPage(id) { current -> updated.copy(participantIds = current.participantIds) }
+                        }.onFailure { e ->
+                            editPage(id) { it.copy(status = AnnotationStatus.ERROR, error = e.message) }
+                            if (e is CaptionException) {
+                                say(e.message ?: "Erreur")
+                                // Une clé invalide ou l'absence de réseau bloquerait toutes les photos.
+                                ids.drop(i + 1).forEach { rest -> editPage(rest) { it.copy(status = AnnotationStatus.TODO) } }
+                                return@launch
+                            }
                         }
-                    }
                 }
-                say("Légendes prêtes ! Relisez-les et cochez les participants.")
+                say(
+                    if (missingPlace > 0) "Légendes prêtes. $missingPlace photo(s) sans GPS attendent leur lieu."
+                    else "Légendes prêtes ! Relisez-les."
+                )
             } finally {
                 captioner?.close()
                 _state.update { it.copy(busyMessage = null) }
@@ -186,8 +286,15 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Édition ----------
 
-    fun updatePlace(id: String, text: String) = editPage(id) { it.copy(place = text) }
+    fun rememberPage(id: String) = _state.update { it.copy(lastPageId = id) }
+
+    /** Lieu saisi à la main : il devient la base de la légende (photos sans GPS). */
+    fun updatePlace(id: String, text: String) = editPage(id) {
+        it.copy(place = text, placeByUser = text.isNotBlank())
+    }
+
     fun updateSummary(id: String, text: String) = editPage(id) { it.copy(summary = text) }
+
     fun toggleParticipant(pageId: String, participantId: String) {
         val removing = _state.value.book.pages.firstOrNull { it.id == pageId }?.participantIds?.contains(participantId) == true
         editPage(pageId) { p ->
@@ -201,20 +308,38 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
     fun setAllParticipants(pageId: String) = editPage(pageId) { p ->
-        p.copy(participantIds = (p.participantIds + _state.value.book.travelers.map { it.id }).distinct())
+        p.copy(participantIds = (p.participantIds + _state.value.book.travelerIds).distinct())
     }
 
     fun deletePage(id: String) {
-        val page = _state.value.book.pages.firstOrNull { it.id == id } ?: return
-        editBook { b -> b.copy(pages = b.pages.filterNot { it.id == id }) }
-        File(page.photoPath).delete()
-        // Les visages nommés restent des modèles utiles ; les autres disparaissent avec la photo.
-        val gone = faceIndex.faces.filter { it.pageId == id && (it.personId == null || it.auto) }
-        gone.forEach { File(it.thumbPath).delete() }
-        faceIndex = faceIndex.copy(faces = faceIndex.faces - gone.toSet())
-        saveFaces()
-        open(Screen.Home)
+        deletePages(setOf(id))
+        open(Screen.Story)
+    }
+
+    // ---------- Sélection multiple ----------
+
+    fun toggleSelected(id: String) = _state.update {
+        it.copy(selectedPages = if (id in it.selectedPages) it.selectedPages - id else it.selectedPages + id)
+    }
+
+    fun selectAll() = _state.update { it.copy(selectedPages = it.book.pages.map { p -> p.id }.toSet()) }
+    fun clearSelection() = _state.update { it.copy(selectedPages = emptySet()) }
+
+    fun deleteSelected() {
+        val ids = _state.value.selectedPages
+        deletePages(ids)
+        clearSelection()
+        say("${ids.size} photo(s) retirée(s) du livre")
+    }
+
+    private fun deletePages(ids: Set<String>) {
+        val pages = _state.value.book.pages.filter { it.id in ids }
+        if (pages.isEmpty()) return
+        editBook { b -> b.copy(pages = b.pages.filterNot { it.id in ids }) }
+        pages.forEach { File(it.photoPath).delete() }
+        forgetFaces(ids)
     }
 
     fun movePage(id: String, delta: Int) = editBook { b ->
@@ -226,49 +351,35 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         b.copy(pages = list)
     }
 
-    // ---------- Réglages ----------
+    // ---------- Proches et réglages ----------
 
-    fun saveBookInfo(title: String, destination: String, start: String, end: String, radius: String) {
-        if (parseDate(start) == null || parseDate(end) == null) {
-            say("Dates attendues au format jj/mm/aaaa")
-            return
+    private fun editPeople(transform: (List<Participant>) -> List<Participant>) {
+        _state.update { it.copy(people = transform(it.people)) }
+        val snapshot = _state.value.people
+        viewModelScope.launch { repo.savePeople(snapshot) }
+    }
+
+    fun addPerson(name: String, description: String): Participant? {
+        if (name.isBlank()) return null
+        val person = Participant(name = name.trim(), description = description.trim())
+        editPeople { it + person }
+        return person
+    }
+
+    fun removePerson(id: String) {
+        editPeople { people -> people.filterNot { it.id == id } }
+        if (_state.value.book.pages.isNotEmpty() || id in _state.value.book.travelerIds) {
+            editBook { b ->
+                b.copy(travelerIds = b.travelerIds - id, pages = b.pages.map { p -> p.copy(participantIds = p.participantIds - id) })
+            }
         }
-        val meters = radius.trim().toIntOrNull()?.takeIf { it in 0..20_000 }
-            ?: run { say("Distance attendue en mètres (ex. 300)"); return }
-        editBook {
-            it.copy(
-                title = title.trim(), destination = destination.trim(),
-                startDate = start.trim(), endDate = end.trim(), groupRadiusMeters = meters,
-            )
-        }
-        say("Enregistré")
+        editFaces { f -> if (f.personId == id) f.copy(personId = null, auto = false) else f }
     }
 
     fun saveApiKey(key: String) {
         settings.apiKey = key
         _state.update { it.copy(apiKeySet = key.isNotBlank()) }
         say(if (key.isBlank()) "Clé API effacée" else "Clé API enregistrée")
-    }
-
-    fun addParticipant(name: String, description: String, onTrip: Boolean = true) {
-        if (name.isBlank()) return
-        editBook {
-            it.copy(participants = it.participants + Participant(name = name.trim(), description = description.trim(), onTrip = onTrip))
-        }
-    }
-
-    fun setOnTrip(id: String, onTrip: Boolean) = editBook { b ->
-        b.copy(participants = b.participants.map { if (it.id == id) it.copy(onTrip = onTrip) else it })
-    }
-
-    fun removeParticipant(id: String) {
-        editBook { b ->
-            b.copy(
-                participants = b.participants.filterNot { it.id == id },
-                pages = b.pages.map { p -> p.copy(participantIds = p.participantIds - id) },
-            )
-        }
-        editFaces { f -> if (f.personId == id) f.copy(personId = null, auto = false) else f }
     }
 
     // ---------- Visages ----------
@@ -278,14 +389,27 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { faceRepo.save(snapshot) }
     }
 
+    private fun currentPageIds() = _state.value.book.pages.map { it.id }.toSet()
+
+    private fun currentClusters() = FaceMatcher.clusters(faceIndex.faces.filter { it.pageId in currentPageIds() })
+
     private fun editFaces(transform: (FaceRecord) -> FaceRecord) {
         faceIndex = faceIndex.copy(faces = faceIndex.faces.map(transform))
         saveFaces()
-        _state.update { it.copy(faceClusters = FaceMatcher.clusters(faceIndex.faces)) }
+        _state.update { it.copy(faceClusters = currentClusters()) }
+    }
+
+    /** Les visages nommés restent des modèles utiles ; les autres disparaissent avec leurs photos. */
+    private fun forgetFaces(pageIds: Set<String>) {
+        val gone = faceIndex.faces.filter { it.pageId in pageIds && (it.personId == null || it.auto) }
+        if (gone.isEmpty()) return
+        gone.forEach { File(it.thumbPath).delete() }
+        faceIndex = faceIndex.copy(faces = faceIndex.faces - gone.toSet())
+        saveFaces()
     }
 
     /**
-     * Repère les visages des photos pas encore analysées, reconnaît les personnes déjà nommées,
+     * Repère les visages des photos pas encore analysées, reconnaît les proches déjà nommés,
      * coche les participants, puis regroupe les visages inconnus pour « Qui est-ce ? ».
      */
     fun recognizeFaces() {
@@ -319,8 +443,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 val ticked = matchKnownFaces()
-                val clusters = FaceMatcher.clusters(faceIndex.faces)
-                _state.update { it.copy(faceClusters = clusters, facesTicked = ticked) }
+                _state.update { it.copy(faceClusters = currentClusters(), facesTicked = ticked) }
                 open(Screen.Faces)
             } finally {
                 _state.update { it.copy(busyMessage = null) }
@@ -328,10 +451,10 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Reconnaît les visages inconnus d'après les personnes nommées ; renvoie le nombre de photos cochées. */
+    /** Reconnaît les visages inconnus de l'histoire ouverte ; renvoie le nombre de photos cochées. */
     private fun matchKnownFaces(): Int {
         val before = faceIndex.faces.associateBy { it.id }
-        faceIndex = faceIndex.copy(faces = FaceMatcher.autoAssign(faceIndex.faces))
+        faceIndex = faceIndex.copy(faces = FaceMatcher.autoAssign(faceIndex.faces, currentPageIds()))
         val newlyNamed = faceIndex.faces.filter { it.personId != null && before[it.id]?.personId == null }
         tickParticipants(newlyNamed)
         saveFaces()
@@ -363,14 +486,12 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         tickParticipants(named)
         val more = matchKnownFaces()
         _state.update {
-            it.copy(faceClusters = FaceMatcher.clusters(faceIndex.faces), facesTicked = it.facesTicked + named.map { n -> n.pageId }.distinct().size + more)
+            it.copy(faceClusters = currentClusters(), facesTicked = it.facesTicked + named.map { n -> n.pageId }.distinct().size + more)
         }
     }
 
     fun nameClusterNewPerson(cluster: FaceCluster, name: String) {
-        if (name.isBlank()) return
-        val person = Participant(name = name.trim(), onTrip = false)
-        editBook { it.copy(participants = it.participants + person) }
+        val person = addPerson(name, "") ?: return
         nameCluster(cluster, person.id)
     }
 
@@ -383,12 +504,12 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Partage ----------
 
     fun share(target: ShareTarget, pageIds: List<String>? = null) {
-        val book = _state.value.book
-        val pages = pageIds?.let { ids -> book.pages.filter { it.id in ids } } ?: book.pages
+        val s = _state.value
+        val pages = pageIds?.let { ids -> s.book.pages.filter { it.id in ids } } ?: s.book.pages
         if (pages.isEmpty()) { say("Aucune photo à partager."); return }
         viewModelScope.launch {
             _state.update { it.copy(busyMessage = "Préparation des images…") }
-            runCatching { ShareHelper.share(getApplication(), book, pages, target) }
+            runCatching { ShareHelper.share(getApplication(), s.book, pages, s.people, target) }
                 .onFailure { say("Partage impossible : ${it.message}") }
             _state.update { it.copy(busyMessage = null) }
         }
@@ -396,23 +517,15 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Fabrique le livre en PDF imprimable (A4) puis propose de l'enregistrer ou de l'envoyer. */
     fun exportPdf() {
-        val book = _state.value.book
-        if (book.pages.isEmpty()) { say("Aucune photo dans le livre."); return }
+        val s = _state.value
+        if (s.book.pages.isEmpty()) { say("Aucune photo dans le livre."); return }
         viewModelScope.launch {
             _state.update { it.copy(busyMessage = "Fabrication du PDF…") }
             runCatching {
-                val file = PdfExporter.export(getApplication(), book, book.pages)
-                PdfExporter.share(getApplication(), file, book)
+                val file = PdfExporter.export(getApplication(), s.book, s.book.pages, s.people)
+                PdfExporter.share(getApplication(), file, s.book)
             }.onFailure { say("PDF impossible : ${it.message}") }
             _state.update { it.copy(busyMessage = null) }
         }
-    }
-
-    companion object {
-        private const val DAY = 24L * 3600 * 1000
-
-        fun parseDate(text: String): Long? = runCatching {
-            SimpleDateFormat("dd/MM/yyyy", Locale.FRANCE).apply { isLenient = false }.parse(text.trim())?.time
-        }.getOrNull()
     }
 }

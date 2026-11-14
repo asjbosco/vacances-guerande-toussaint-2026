@@ -24,10 +24,11 @@ object FaceMatcher {
     }
 
     /**
-     * Reconnaît les visages inconnus d'après ceux que vous avez déjà nommés.
+     * Reconnaît les visages inconnus des photos [candidatePageIds] d'après ceux que vous avez
+     * déjà nommés (dans toutes vos histoires).
      * Une même personne n'est retenue qu'une fois par photo (le visage le plus ressemblant).
      */
-    fun autoAssign(faces: List<FaceRecord>): List<FaceRecord> {
+    fun autoAssign(faces: List<FaceRecord>, candidatePageIds: Set<String>): List<FaceRecord> {
         val references = faces.filter { it.personId != null && !it.auto && !it.ignored }
         if (references.isEmpty()) return faces
         val byPerson = references.groupBy { it.personId!! }
@@ -35,7 +36,7 @@ object FaceMatcher {
         data class Guess(val faceId: String, val pageId: String, val personId: String, val score: Float)
 
         val guesses = faces
-            .filter { it.personId == null && !it.ignored }
+            .filter { it.personId == null && !it.ignored && it.pageId in candidatePageIds }
             .mapNotNull { face ->
                 byPerson.map { (person, refs) ->
                     person to refs.maxOf { similarity(face.embedding, it.embedding) }

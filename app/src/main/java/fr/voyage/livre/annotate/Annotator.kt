@@ -10,22 +10,31 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Annote une page : lieu (GPS → adresse), articles Wikipédia proches,
- * puis légende rédigée par Claude (ou extrait Wikipédia si pas de clé API).
+ * Annote une page à partir de sa localisation : le GPS de la photo, ou à défaut le lieu
+ * que vous avez indiqué. Texte rédigé par Claude, ou repris de Wikipédia (sources libres).
  */
 class Annotator(private val context: Context) {
 
     suspend fun annotate(page: BookPage, book: Book, captioner: ClaudeCaptioner?): BookPage {
         val lat = page.latitude
         val lon = page.longitude
+        // Lieu saisi par vous (ou, sans GPS, le lieu déjà noté) : il prime sur tout le reste.
+        val userPlace = page.place.trim().takeIf { (page.placeByUser || !page.hasGps) && it.isNotEmpty() }
 
-        val address = if (lat != null && lon != null) PlaceFinder.placeName(context, lat, lon) else null
+        // Sans GPS ni lieu indiqué, on ne devine pas : c'est à vous de le préciser.
+        if ((lat == null || lon == null) && userPlace == null) {
+            return page.copy(
+                status = AnnotationStatus.ERROR,
+                error = "Pas de position GPS : indiquez le lieu ou le nom de la photo.",
+            )
+        }
+
+        val address = if (lat != null && lon != null) PlaceFinder.find(context, lat, lon) else null
 
         val articles = runCatching {
             when {
                 lat != null && lon != null -> WikipediaClient.nearby(lat, lon)
-                address != null -> WikipediaClient.search(address)
-                else -> emptyList()
+                else -> WikipediaClient.search(listOfNotNull(userPlace, book.destination.ifBlank { null }).joinToString(" "))
             }
         }.getOrDefault(emptyList())
 
@@ -43,25 +52,28 @@ class Annotator(private val context: Context) {
                 photo = bitmap.forVision(),
                 destination = book.destination,
                 dateText = page.takenAt?.let { formatDate(it) },
-                guessedPlace = address,
+                address = address?.label,
+                userPlace = userPlace,
                 gps = if (lat != null && lon != null) "%.5f, %.5f".format(Locale.US, lat, lon) else null,
                 articles = articles,
                 neighbourCaptions = neighbours.map { "${it.place} : ${it.summary}" },
             )
         }
 
-        // Sans Claude : on évite de reprendre un article déjà cité juste à côté.
+        // Sans Claude : article le plus proche (pas déjà cité juste à côté).
         val best = articles.firstOrNull { it.title !in usedArticles }
-        val repeatsNeighbour = best == null && articles.isNotEmpty()
-        val place = caption?.place?.takeIf { it.isNotBlank() }
-            ?: address
-            ?: best?.title
+        val closeArticle = best?.takeIf { (it.distanceMeters ?: 0.0) <= 200.0 }
+
+        val place = userPlace
+            ?: caption?.place?.takeIf { it.isNotBlank() }
+            ?: closeArticle?.title
             ?: neighbours.firstOrNull()?.place
-            ?: articles.firstOrNull()?.title
+            ?: address?.town
+            ?: address?.label
             ?: page.place
-        val summary = caption?.summary
-            ?: best?.let { WikipediaClient.firstSentences(it.extract) }
-            ?: if (repeatsNeighbour) "" else page.summary
+        val summary = caption?.summary?.let { telegraphic(it) }
+            ?: best?.let { telegraphic(WikipediaClient.firstSentences(it.extract, 1)) }
+            ?: ""
 
         return page.copy(
             place = place,
@@ -73,7 +85,21 @@ class Annotator(private val context: Context) {
     }
 
     companion object {
+        /** Longueur maximale du texte : environ deux lignes. */
+        const val MAX_SUMMARY = 120
+
         fun formatDate(millis: Long): String =
             SimpleDateFormat("EEEE d MMMM yyyy", Locale.FRANCE).format(Date(millis))
+
+        fun shortDate(millis: Long): String =
+            SimpleDateFormat("d MMMM yyyy", Locale.FRANCE).format(Date(millis))
+
+        /** Coupe le texte à ~2 lignes, sur un mot entier. */
+        fun telegraphic(text: String): String {
+            val t = text.trim().replace(Regex("\\s+"), " ")
+            if (t.length <= MAX_SUMMARY) return t
+            val cut = t.take(MAX_SUMMARY).substringBeforeLast(' ').trimEnd(',', ';', ':', ' ')
+            return "$cut…"
+        }
     }
 }

@@ -12,12 +12,15 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.voyage.livre.ui.BookViewModel
 import fr.voyage.livre.ui.EditorScreen
 import fr.voyage.livre.ui.FacesScreen
-import fr.voyage.livre.ui.HomeScreen
+import fr.voyage.livre.ui.LibraryScreen
+import fr.voyage.livre.ui.StoryScreen
+import fr.voyage.livre.ui.BookInfoScreen
 import fr.voyage.livre.ui.PickerScreen
 import fr.voyage.livre.ui.Screen
 import fr.voyage.livre.ui.SettingsScreen
@@ -33,11 +36,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             LivreTheme {
                 val state by viewModel.state.collectAsStateWithLifecycle()
-                BackHandler(enabled = state.screen != Screen.Home) { viewModel.back() }
+                BackHandler(enabled = state.screen != Screen.Library) { viewModel.back() }
                 when (val s = state.screen) {
-                    Screen.Home -> HomeScreen(state, viewModel)
+                    Screen.Library -> LibraryScreen(state, viewModel)
+                    Screen.Story -> StoryScreen(state, viewModel)
+                    Screen.BookInfo -> BookInfoScreen(state, viewModel)
                     Screen.Picker -> PickerScreen(state, viewModel)
-                    is Screen.Editor -> EditorScreen(state, viewModel, s.pageId)
+                    is Screen.Editor -> key(s.pageId) { EditorScreen(state, viewModel, s.pageId) }
                     is Screen.Viewer -> ViewerScreen(state, viewModel, s.startIndex)
                     Screen.Settings -> SettingsScreen(state, viewModel)
                     Screen.Faces -> FacesScreen(state, viewModel)

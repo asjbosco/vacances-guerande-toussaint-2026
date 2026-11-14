@@ -28,10 +28,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import fr.voyage.livre.annotate.Annotator
+import fr.voyage.livre.data.CaptionFormat
 import java.io.File
 
 /** Le livre se feuillette de gauche à droite : une couverture puis une page par photo. */
@@ -80,11 +81,11 @@ private fun Cover(state: UiState) {
                 book.title, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
                 fontSize = 28.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.primary,
             )
-            Text(book.destination, fontFamily = FontFamily.Serif, textAlign = TextAlign.Center)
-            Text("Du ${book.startDate} au ${book.endDate}", style = MaterialTheme.typography.bodySmall)
-            if (book.travelers.isNotEmpty()) {
+            if (book.destination.isNotBlank()) Text(book.destination, fontFamily = FontFamily.Serif, textAlign = TextAlign.Center)
+            if (book.dateRange.isNotBlank()) Text(book.dateRange, style = MaterialTheme.typography.bodySmall)
+            if (state.travelers.isNotEmpty()) {
                 Text(
-                    book.travelers.joinToString(", ") { it.name },
+                    state.travelers.joinToString(", ") { it.name },
                     fontStyle = FontStyle.Italic, textAlign = TextAlign.Center,
                 )
             }
@@ -95,30 +96,27 @@ private fun Cover(state: UiState) {
 @Composable
 private fun BookPageView(state: UiState, index: Int) {
     val page = state.book.pages[index]
-    val people = state.book.participants.filter { it.id in page.participantIds }
+    val footer = CaptionFormat.footer(page, state.people)
     Column(Modifier.fillMaxSize()) {
         AsyncImage(
             model = File(page.photoPath), contentDescription = page.place,
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxWidth().weight(1f).background(MaterialTheme.colorScheme.surfaceVariant),
         )
+        // Lieu en gras, texte sur 2 lignes, puis la date et les personnes.
         Column(
-            Modifier.fillMaxWidth().weight(0.8f).verticalScroll(rememberScrollState()).padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
                 page.place.ifBlank { "—" }, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold,
-                fontSize = 22.sp, color = MaterialTheme.colorScheme.primary,
+                fontSize = 22.sp, color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
-            page.takenAt?.let {
-                Text(Annotator.formatDate(it).replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.labelMedium)
+            if (page.summary.isNotBlank()) {
+                Text(page.summary, fontFamily = FontFamily.Serif, fontSize = 17.sp, lineHeight = 24.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            if (page.summary.isNotBlank()) Text(page.summary, fontFamily = FontFamily.Serif, fontSize = 17.sp, lineHeight = 25.sp)
-            if (people.isNotEmpty()) {
-                Text(
-                    "Avec " + people.joinToString(", ") { it.name },
-                    fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.secondary,
-                )
+            if (footer.isNotBlank()) {
+                Text(footer, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
