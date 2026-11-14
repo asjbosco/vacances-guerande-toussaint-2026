@@ -20,6 +20,7 @@ class LibraryRepository(private val context: Context) {
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+        allowSpecialFloatingPointValues = true
     }
     private val mutex = Mutex()
     private val booksDir = File(context.filesDir, "histoires").apply { mkdirs() }

@@ -26,6 +26,9 @@ import fr.voyage.livre.share.PdfExporter
 import fr.voyage.livre.share.PdfQuality
 import fr.voyage.livre.share.ShareHelper
 import fr.voyage.livre.share.ShareTarget
+import fr.voyage.livre.CrashReporter
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,11 +73,24 @@ data class UiState(
     val faceClusters: List<FaceCluster> = emptyList(),
     /** Nombre de photos où des proches ont été cochés automatiquement. */
     val facesTicked: Int = 0,
+    /** Rapport d'un plantage précédent, à montrer une fois. */
+    val crashReport: String? = null,
 ) {
     val travelers: List<Participant> get() = book.travelers(people)
 }
 
 class BookViewModel(app: Application) : AndroidViewModel(app) {
+
+    /**
+     * Toute erreur imprévue dans une tâche de fond est notée dans le rapport et affichée,
+     * au lieu de fermer l'application.
+     */
+    private val errorHandler = CoroutineExceptionHandler { _, e ->
+        runCatching { CrashReporter.record(getApplication(), e, "Erreur évitée") }
+        _state.update { it.copy(busyMessage = null, message = "Erreur : ${e.message ?: e.javaClass.simpleName}", crashReport = CrashReporter.lastReport(getApplication())) }
+    }
+
+    private fun launchSafe(block: suspend CoroutineScope.() -> Unit): Job = viewModelScope.launch(errorHandler, block = block)
 
     private val repo = LibraryRepository(app)
     private val settings = Settings(app)
@@ -90,11 +106,13 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     private var annotateJob: Job? = null
 
     init {
-        viewModelScope.launch {
+        launchSafe {
             val books = repo.loadBooks()
             val people = repo.loadPeople()
             faceIndex = faceRepo.load()
-            _state.update { it.copy(books = books, people = people, loaded = true) }
+            _state.update {
+                it.copy(books = books, people = people, loaded = true, crashReport = CrashReporter.lastReport(getApplication()))
+            }
         }
     }
 
@@ -118,6 +136,11 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearMessage() = _state.update { it.copy(message = null) }
+
+    fun dismissCrashReport() {
+        CrashReporter.clear(getApplication())
+        _state.update { it.copy(crashReport = null) }
+    }
     private fun say(text: String) = _state.update { it.copy(message = text) }
 
     private fun editBook(transform: (Book) -> Book) {
@@ -126,7 +149,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
             s.copy(book = updated, books = s.books.map { if (it.id == updated.id) updated else it })
         }
         val snapshot = _state.value.book
-        viewModelScope.launch { repo.saveBook(snapshot) }
+        launchSafe { repo.saveBook(snapshot) }
     }
 
     private fun editPage(id: String, transform: (BookPage) -> BookPage) = editBook { b ->
@@ -153,14 +176,14 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
             travelerIds = travelerIds,
         )
         _state.update { it.copy(books = listOf(book) + it.books) }
-        viewModelScope.launch { repo.saveBook(book) }
+        launchSafe { repo.saveBook(book) }
         openBook(book.id)
         open(Screen.Picker)
     }
 
     fun duplicateBook(id: String) {
         val book = _state.value.books.firstOrNull { it.id == id } ?: return
-        viewModelScope.launch {
+        launchSafe {
             _state.update { it.copy(busyMessage = "Copie de l'histoire…") }
             val copy = repo.duplicate(book, "${book.title} (copie)")
             _state.update { it.copy(books = listOf(copy) + it.books, busyMessage = null) }
@@ -172,7 +195,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         val book = _state.value.books.firstOrNull { it.id == id } ?: return
         _state.update { it.copy(books = it.books.filterNot { b -> b.id == id }) }
         forgetFaces(book.pages.map { it.id }.toSet())
-        viewModelScope.launch { repo.deleteBook(book) }
+        launchSafe { repo.deleteBook(book) }
         say("Histoire supprimée")
     }
 
@@ -193,7 +216,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadGallery() {
         _state.update { it.copy(galleryLoading = true) }
-        viewModelScope.launch {
+        launchSafe {
             val photos = runCatching { Gallery.allPhotos(getApplication()) }
                 .getOrElse { say("Impossible de lire la galerie : ${it.message}"); emptyList() }
             _state.update { it.copy(galleryPhotos = photos, galleryLoading = false) }
@@ -205,7 +228,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         val toImport = selected.filter { it.uri.toString() !in existing }.sortedBy { it.takenAt }
         open(Screen.Story)
         if (toImport.isEmpty()) return
-        viewModelScope.launch {
+        launchSafe {
             var noGps = 0
             toImport.forEachIndexed { i, photo ->
                 _state.update { it.copy(busyMessage = "Import des photos… ${i + 1}/${toImport.size}") }
@@ -247,8 +270,15 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
             say("Pour Claude, enregistrez d'abord votre clé API dans les réglages ⚙️.")
             return
         }
-        annotateJob = viewModelScope.launch {
-            val captioner = if (source == CaptionSource.CLAUDE) ClaudeCaptioner(settings.apiKey) else null
+        annotateJob = launchSafe {
+            val captioner = if (source == CaptionSource.CLAUDE) {
+                runCatching { ClaudeCaptioner(settings.apiKey) }
+                    .onFailure { e ->
+                        CrashReporter.record(getApplication(), e, "Démarrage de Claude")
+                        say("Claude indisponible (${e.javaClass.simpleName}) : textes repris de Wikipédia.")
+                    }
+                    .getOrNull()
+            } else null
             var missingPlace = 0
             try {
                 ids.forEachIndexed { i, id ->
@@ -279,7 +309,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
                     else "Légendes prêtes ! Relisez-les."
                 )
             } finally {
-                captioner?.close()
+                runCatching { captioner?.close() }
                 _state.update { it.copy(busyMessage = null) }
             }
         }
@@ -357,7 +387,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     private fun editPeople(transform: (List<Participant>) -> List<Participant>) {
         _state.update { it.copy(people = transform(it.people)) }
         val snapshot = _state.value.people
-        viewModelScope.launch { repo.savePeople(snapshot) }
+        launchSafe { repo.savePeople(snapshot) }
     }
 
     fun addPerson(name: String, description: String): Participant? {
@@ -387,7 +417,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun saveFaces() {
         val snapshot = faceIndex
-        viewModelScope.launch { faceRepo.save(snapshot) }
+        launchSafe { faceRepo.save(snapshot) }
     }
 
     private fun currentPageIds() = _state.value.book.pages.map { it.id }.toSet()
@@ -415,7 +445,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun recognizeFaces() {
         if (annotateJob?.isActive == true) return
-        annotateJob = viewModelScope.launch {
+        annotateJob = launchSafe {
             val todo = _state.value.book.pages.filter { !it.facesScanned }
             try {
                 if (todo.isNotEmpty()) {
@@ -508,7 +538,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         val s = _state.value
         val pages = pageIds?.let { ids -> s.book.pages.filter { it.id in ids } } ?: s.book.pages
         if (pages.isEmpty()) { say("Aucune photo à partager."); return }
-        viewModelScope.launch {
+        launchSafe {
             _state.update { it.copy(busyMessage = "Préparation des images…") }
             runCatching { ShareHelper.share(getApplication(), s.book, pages, s.people, target) }
                 .onFailure { say("Partage impossible : ${it.message}") }
@@ -520,7 +550,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     fun exportPdf(quality: PdfQuality) {
         val s = _state.value
         if (s.book.pages.isEmpty()) { say("Aucune photo dans le livre."); return }
-        viewModelScope.launch {
+        launchSafe {
             _state.update { it.copy(busyMessage = "Fabrication du PDF (photos en haute définition)…") }
             runCatching {
                 val file = PdfExporter.export(getApplication(), s.book, s.book.pages, s.people, quality)

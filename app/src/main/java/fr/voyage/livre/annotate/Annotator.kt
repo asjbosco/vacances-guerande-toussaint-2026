@@ -5,6 +5,8 @@ import fr.voyage.livre.data.AnnotationStatus
 import fr.voyage.livre.data.Book
 import fr.voyage.livre.data.BookPage
 import fr.voyage.livre.data.isNear
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,10 +48,10 @@ class Annotator(private val context: Context) {
         val usedArticles = neighbours.map { it.wikiTitle }.filter { it.isNotBlank() }.toSet()
 
         val caption = captioner?.let { claude ->
-            val bitmap = PhotoImporter.decodeFileScaled(page.photoPath, 1568)
+            val bitmap = withContext(Dispatchers.Default) { PhotoImporter.decodeFileScaled(page.photoPath, 1568)?.forVision() }
                 ?: error("Photo introuvable")
             claude.caption(
-                photo = bitmap.forVision(),
+                photo = bitmap,
                 destination = book.destination,
                 dateText = page.takenAt?.let { formatDate(it) },
                 address = address?.label,

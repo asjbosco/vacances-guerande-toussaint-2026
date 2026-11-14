@@ -23,6 +23,7 @@
     </queries>
 
     <application
+        android:name=".LivreApp"
         android:allowBackup="true"
         android:largeHeap="true"
         android:icon="@drawable/ic_launcher"

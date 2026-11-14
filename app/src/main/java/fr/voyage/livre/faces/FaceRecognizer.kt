@@ -59,6 +59,7 @@ class FaceRecognizer(context: Context, private val thumbsDir: File) : AutoClosea
                 }
                 FoundFace(thumb.absolutePath, embedding)
             }
+            .filter { f -> f.embedding.none { it.isNaN() } }
     }
 
     /** Empreinte normalisée (longueur 1) : deux visages se comparent par simple produit scalaire. */

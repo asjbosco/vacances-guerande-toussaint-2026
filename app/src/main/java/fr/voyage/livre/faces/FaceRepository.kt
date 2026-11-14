@@ -14,7 +14,7 @@ import java.io.File
  * une personne nommée une fois est reconnue dans les voyages suivants.
  */
 class FaceRepository(context: Context) {
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; allowSpecialFloatingPointValues = true }
     private val file = File(context.filesDir, "visages.json")
     private val mutex = Mutex()
     val thumbsDir = File(context.filesDir, "visages")
