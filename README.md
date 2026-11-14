@@ -20,6 +20,17 @@ chaque photo reçoit le **lieu**, un **court texte historique ou géographique**
    Chaque photo est envoyée avec sa légende **incrustée en dessous**, pour que le texte
    reste visible même là où l'application ne reprend pas les légendes (Facebook).
 
+## Installer l'application sur le téléphone
+
+À chaque fusion sur `main`, GitHub construit automatiquement l'application
+(et vérifie aussi que chaque pull request compile) :
+
+1. Sur GitHub, onglet **Releases** : ouvrez la dernière version (le plus simple depuis le téléphone).
+   À défaut, onglet **Actions**, dernière exécution réussie (✅), fichier **LivreDeVoyage** (un .zip à ouvrir).
+2. Téléchargez **LivreDeVoyage.apk**.
+3. Ouvrez le fichier sur le téléphone Android et acceptez l'installation
+   « depuis une source inconnue » quand Android le demande.
+
 ## Réglages au premier lancement (⚙️)
 
 - **Le voyage** : titre, région visitée, dates (pré-remplis pour Guérande, Toussaint 2026).
