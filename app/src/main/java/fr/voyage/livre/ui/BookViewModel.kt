@@ -300,7 +300,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
                                 say(e.message ?: "Erreur")
                                 // Une clé invalide ou l'absence de réseau bloquerait toutes les photos.
                                 ids.drop(i + 1).forEach { rest -> editPage(rest) { it.copy(status = AnnotationStatus.TODO) } }
-                                return@launch
+                                return@launchSafe
                             }
                         }
                 }
@@ -452,7 +452,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
                     val recognizer = withContext(Dispatchers.IO) {
                         runCatching { FaceRecognizer(getApplication(), faceRepo.thumbsDir) }.getOrNull()
                     }
-                    if (recognizer == null) { say("La reconnaissance des visages n'a pas pu démarrer."); return@launch }
+                    if (recognizer == null) { say("La reconnaissance des visages n'a pas pu démarrer."); return@launchSafe }
                     try {
                         todo.forEachIndexed { i, page ->
                             _state.update { it.copy(busyMessage = "Recherche des visages… ${i + 1}/${todo.size}") }
