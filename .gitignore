@@ -8,3 +8,7 @@ captures/
 .kotlin/
 # Modèle de visages téléchargé à la compilation
 app/src/main/assets/facenet.tflite
+
+# Application Mac : projet Xcode généré et compilation
+mac/LivreDeVoyage.xcodeproj/
+mac/build/

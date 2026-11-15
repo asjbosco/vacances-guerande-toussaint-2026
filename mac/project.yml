@@ -1,0 +1,35 @@
+name: LivreDeVoyage
+options:
+  bundleIdPrefix: fr.voyage
+  deploymentTarget:
+    macOS: "13.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  LivreDeVoyage:
+    type: application
+    platform: macOS
+    sources:
+      - LivreDeVoyage
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fr.voyage.livre.mac
+        PRODUCT_NAME: Livre de voyage
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Livre de voyage
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.photography
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        # Textes affichés par macOS quand l'application demande une autorisation.
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Pour choisir les photos du livre et lire leur date et leur position."
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: "Pour importer les photos sélectionnées dans l'application Photos."
+        INFOPLIST_KEY_NSLocationUsageDescription: "Pour retrouver le nom des lieux des photos."
+        # Application non publiée sur l'App Store : pas de bac à sable, pour pouvoir lire
+        # les noms des Personnes de la photothèque (avec l'accès complet au disque).
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
