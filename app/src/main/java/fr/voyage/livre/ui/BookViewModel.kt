@@ -172,6 +172,35 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Raccourcit le texte actuel de la légende (via Claude) pour tenir en ~3 lignes. */
+    fun shortenCaption(pageId: String) {
+        val page = _state.value.book.pages.firstOrNull { it.id == pageId } ?: return
+        if (page.summary.isBlank()) { say("Il n'y a pas encore de texte à raccourcir."); return }
+        val key = settings.apiKey
+        if (key.isBlank()) { say("Ajoutez votre clé API Claude dans les réglages (⚙️) pour raccourcir le texte."); return }
+        if (annotateJob?.isActive == true) return
+        annotateJob = viewModelScope.launch {
+            val captioner = ClaudeCaptioner(key)
+            _state.update { it.copy(busyMessage = "Raccourcissement du texte…") }
+            try {
+                val short = captioner.shorten(page.summary)
+                if (short.isNotBlank()) {
+                    editPage(pageId) { it.copy(summary = short) }
+                    say("Texte raccourci — relisez-le avant de l'utiliser.")
+                } else {
+                    say("Raccourcissement impossible, réessayez.")
+                }
+            } catch (e: CaptionException) {
+                say(e.message ?: "Erreur")
+            } catch (e: Exception) {
+                say("Raccourcissement impossible : ${e.message}")
+            } finally {
+                captioner.close()
+                _state.update { it.copy(busyMessage = null) }
+            }
+        }
+    }
+
     // ---------- Édition ----------
 
     fun updatePlace(id: String, text: String) = editPage(id) { it.copy(place = text) }

@@ -84,6 +84,32 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
         parse(text)
     }
 
+    /** Raccourcit un texte existant (sans image) pour qu'il tienne en ~3 lignes. */
+    suspend fun shorten(text: String): String = withContext(Dispatchers.IO) {
+        val params = MessageCreateParams.builder()
+            .model(MODEL)
+            .maxTokens(1000L)
+            .system(SHORTEN_PROMPT)
+            .outputConfig(OutputConfig.builder().effort(OutputConfig.Effort.LOW).build())
+            .addUserMessageOfContentBlockParams(listOf(ContentBlockParam.ofText(text)))
+            .build()
+        val message = try {
+            client.messages().create(params)
+        } catch (e: UnauthorizedException) {
+            throw CaptionException("Clé API refusée : vérifiez-la dans les réglages.")
+        } catch (e: PermissionDeniedException) {
+            throw CaptionException("Cette clé API n'a pas accès à Claude.")
+        } catch (e: RateLimitException) {
+            throw CaptionException("Trop de demandes d'un coup : réessayez dans une minute.")
+        } catch (e: BadRequestException) {
+            throw CaptionException("Demande refusée par Claude : ${e.message}")
+        } catch (e: AnthropicIoException) {
+            throw CaptionException("Pas de connexion Internet.")
+        }
+        if (message.stopReason().orElse(null) == StopReason.REFUSAL) return@withContext ""
+        message.content().mapNotNull { it.text().orElse(null)?.text() }.joinToString("\n").trim()
+    }
+
     private fun context(
         destination: String,
         dateText: String?,
@@ -156,6 +182,14 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
             Réponds exactement sous cette forme, sans rien d'autre :
             LIEU : <nom court du lieu ou de l'œuvre, puis la commune>
             RÉSUMÉ : <le texte>
+        """.trimIndent()
+
+        private val SHORTEN_PROMPT = """
+            Tu raccourcis le texte d'une légende de livre-souvenir de voyage, en français.
+            Réécris-le en 1 à 3 phrases ENTIÈRES (45 mots au plus), qui tiennent en 3 lignes environ.
+            Garde les faits essentiels (lieu, œuvre, artiste, date) sans rien inventer ni ajouter.
+            Chaque phrase se termine par un point ; ne laisse jamais de phrase coupée.
+            Réponds uniquement par le texte raccourci, sans préface ni guillemets.
         """.trimIndent()
     }
 }

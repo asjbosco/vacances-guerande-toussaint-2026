@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -19,6 +20,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Share
@@ -42,6 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import fr.voyage.livre.annotate.Annotator
@@ -59,6 +64,7 @@ fun EditorScreen(state: UiState, vm: BookViewModel, pageId: String) {
 
     var confirmDelete by remember { mutableStateOf(false) }
     var showShare by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
 
     Scaffold(
         topBar = {
@@ -82,7 +88,7 @@ fun EditorScreen(state: UiState, vm: BookViewModel, pageId: String) {
         snackbarHost = { MessageHost(state, vm) },
     ) { padding ->
         Column(
-            Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            Modifier.padding(padding).fillMaxSize().imePadding().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             AsyncImage(
@@ -144,6 +150,21 @@ fun EditorScreen(state: UiState, vm: BookViewModel, pageId: String) {
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 4,
             )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { clipboard.setText(AnnotatedString(page.summary)) }) {
+                    Icon(Icons.Default.ContentCopy, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copier")
+                }
+                TextButton(
+                    onClick = { vm.shortenCaption(page.id) },
+                    enabled = state.busyMessage == null && page.summary.isNotBlank(),
+                ) {
+                    Icon(Icons.Default.Compress, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Raccourcir à 3 lignes")
+                }
+            }
 
             Row {
                 Text("Participants", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
