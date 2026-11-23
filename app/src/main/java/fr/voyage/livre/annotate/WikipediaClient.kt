@@ -99,9 +99,21 @@ object WikipediaClient {
         }
     }
 
-    /** Les premières phrases d'un texte (repli quand Claude n'est pas utilisé). */
-    fun firstSentences(text: String, count: Int = 3): String {
-        val sentences = Regex("(?<=[.!?])\\s+").split(text.trim())
-        return sentences.take(count).joinToString(" ")
+    /**
+     * Les premières phrases d'un texte, en restant sous une longueur donnée (≈ 3 lignes)
+     * mais toujours sur des phrases ENTIÈRES : on n'ajoute une phrase que si elle tient
+     * en entier, et on en garde au moins une même si elle dépasse. Jamais de phrase coupée.
+     */
+    fun firstSentences(text: String, maxChars: Int = 220): String {
+        val clean = text.trim().replace(Regex("\\s+"), " ")
+        if (clean.isEmpty()) return ""
+        val sentences = Regex("(?<=[.!?])\\s+").split(clean).filter { it.isNotBlank() }
+        if (sentences.isEmpty()) return clean
+        val sb = StringBuilder(sentences.first())
+        for (s in sentences.drop(1)) {
+            if (sb.length + 1 + s.length > maxChars) break
+            sb.append(' ').append(s)
+        }
+        return sb.toString().trim()
     }
 }

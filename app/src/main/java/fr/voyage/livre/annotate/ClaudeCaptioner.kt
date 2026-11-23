@@ -135,13 +135,26 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
             un fait marquant. Choisis l'article Wikipédia qui correspond vraiment à ce qu'on voit ;
             ignore ceux qui n'ont pas de rapport.
 
-            Le texte fait 2 ou 3 phrases (60 mots au plus), sur un ton chaleureux et précis.
-            Appuie-toi sur les extraits fournis et sur des faits sûrs ; si tu n'es pas certain du
-            lieu exact, reste sur ce qui se voit et sur la région, sans inventer de nom ni de date.
-            Ne parle pas des personnes présentes sur la photo : elles sont ajoutées à part.
+            ŒUVRES D'ART — Si la photo montre surtout une œuvre d'art (tableau, peinture, fresque,
+            mosaïque, vitrail, sculpture, tapisserie…), essaie d'identifier précisément l'œuvre :
+            donne son titre, le nom de l'artiste et la date de réalisation si tu la connais, puis
+            décris en une phrase très courte ce qui est représenté. N'invente jamais : si tu n'es
+            pas sûr de l'œuvre ou de l'artiste, ne devine pas — écris une phrase qui dit ce que l'on
+            voit (par ex. « fresque représentant… ») puis invite à préciser, en commençant le résumé
+            par « À préciser : ». Exemple : « À préciser : mosaïque non identifiée ; indique son titre
+            et son auteur si tu les connais. »
+
+            LONGUEUR — Le texte fait 1 à 3 phrases ENTIÈRES (45 mots au plus) et tient en 3 lignes
+            environ. Chaque phrase doit être complète et se terminer par un point : ne laisse jamais
+            une phrase inachevée ou coupée en plein milieu.
+
+            Ton chaleureux et précis. Appuie-toi sur les extraits fournis et sur des faits sûrs ; si
+            tu n'es pas certain du lieu exact, reste sur ce qui se voit et sur la région, sans inventer
+            de nom ni de date. Ne parle pas des personnes présentes sur la photo : elles sont ajoutées
+            à part.
 
             Réponds exactement sous cette forme, sans rien d'autre :
-            LIEU : <nom court du lieu, puis la commune>
+            LIEU : <nom court du lieu ou de l'œuvre, puis la commune>
             RÉSUMÉ : <le texte>
         """.trimIndent()
     }
