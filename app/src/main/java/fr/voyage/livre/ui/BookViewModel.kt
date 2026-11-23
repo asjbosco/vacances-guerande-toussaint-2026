@@ -46,6 +46,7 @@ data class UiState(
     val busyMessage: String? = null,
     val message: String? = null,
     val apiKeySet: Boolean = false,
+    val visionKeySet: Boolean = false,
 )
 
 class BookViewModel(app: Application) : AndroidViewModel(app) {
@@ -54,7 +55,9 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     private val settings = Settings(app)
     private val annotator = Annotator(app)
 
-    private val _state = MutableStateFlow(UiState(apiKeySet = settings.apiKey.isNotBlank()))
+    private val _state = MutableStateFlow(
+        UiState(apiKeySet = settings.apiKey.isNotBlank(), visionKeySet = settings.visionKey.isNotBlank())
+    )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var annotateJob: Job? = null
@@ -150,7 +153,7 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
                     val page = _state.value.book.pages.firstOrNull { it.id == id } ?: return@forEachIndexed
                     _state.update { it.copy(busyMessage = "Rédaction des légendes… ${i + 1}/${ids.size}") }
                     editPage(id) { it.copy(status = AnnotationStatus.RUNNING, error = null) }
-                    val result = runCatching { annotator.annotate(page, _state.value.book, captioner, source) }
+                    val result = runCatching { annotator.annotate(page, _state.value.book, captioner, source, settings.visionKey) }
                     result.onSuccess { updated ->
                         // Garde les personnes cochées pendant l'annotation.
                         editPage(id) { current -> updated.copy(participantIds = current.participantIds) }
@@ -244,6 +247,12 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         settings.apiKey = key
         _state.update { it.copy(apiKeySet = key.isNotBlank()) }
         say(if (key.isBlank()) "Clé API effacée" else "Clé API enregistrée")
+    }
+
+    fun saveVisionKey(key: String) {
+        settings.visionKey = key
+        _state.update { it.copy(visionKeySet = key.isNotBlank()) }
+        say(if (key.isBlank()) "Clé Google Vision effacée" else "Clé Google Vision enregistrée")
     }
 
     fun addParticipant(name: String, description: String) {

@@ -46,6 +46,7 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
     var newName by rememberSaveable { mutableStateOf("") }
     var newDescription by rememberSaveable { mutableStateOf("") }
     var apiKey by rememberSaveable { mutableStateOf("") }
+    var visionKey by rememberSaveable { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -126,6 +127,32 @@ fun SettingsScreen(state: UiState, vm: BookViewModel) {
                 }
                 if (state.apiKeySet) {
                     OutlinedButton(onClick = { vm.saveApiKey("") }) { Text("Effacer") }
+                }
+            }
+
+            HorizontalDivider()
+            Text("Google Vision (identification par l'image)", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (state.visionKeySet) "✅ Une clé Google Vision est enregistrée sur ce téléphone."
+                else "Facultatif. Quand Claude n'est pas sûr d'une œuvre d'art ou d'un bâtiment, " +
+                    "l'application cherche automatiquement par l'image. Créez une clé « Cloud Vision API » " +
+                    "sur console.cloud.google.com.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            OutlinedTextField(
+                visionKey, { visionKey = it.trim() },
+                label = { Text(if (state.visionKeySet) "Remplacer la clé Google Vision" else "Clé Google Vision (AIza…)") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { vm.saveVisionKey(visionKey); visionKey = "" }, enabled = visionKey.isNotBlank()) {
+                    Text("Enregistrer la clé")
+                }
+                if (state.visionKeySet) {
+                    OutlinedButton(onClick = { vm.saveVisionKey("") }) { Text("Effacer") }
                 }
             }
         }

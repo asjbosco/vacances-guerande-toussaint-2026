@@ -20,6 +20,7 @@ class Annotator(private val context: Context) {
         book: Book,
         captioner: ClaudeCaptioner?,
         source: CaptionSource = CaptionSource.AUTO,
+        visionKey: String? = null,
     ): BookPage {
         val lat = page.latitude
         val lon = page.longitude
@@ -36,18 +37,28 @@ class Annotator(private val context: Context) {
 
         // Wikipédia explicitement demandé → on n'appelle pas Claude.
         val useClaude = captioner != null && source != CaptionSource.WIKIPEDIA
-        val caption = if (useClaude) {
-            val bitmap = PhotoImporter.decodeFileScaled(page.photoPath, 1568)
-                ?: error("Photo introuvable")
-            captioner!!.caption(
-                photo = bitmap.forVision(),
-                destination = book.destination,
-                dateText = page.takenAt?.let { formatDate(it) },
-                guessedPlace = address,
-                gps = if (lat != null && lon != null) "%.5f, %.5f".format(Locale.US, lat, lon) else null,
-                articles = articles,
-            )
-        } else null
+        var caption: Caption? = null
+        if (useClaude) {
+            val claude = captioner!!
+            val bitmap = (PhotoImporter.decodeFileScaled(page.photoPath, 1568)
+                ?: error("Photo introuvable")).forVision()
+            val dateText = page.takenAt?.let { formatDate(it) }
+            val gpsText = if (lat != null && lon != null) "%.5f, %.5f".format(Locale.US, lat, lon) else null
+
+            caption = claude.caption(bitmap, book.destination, dateText, address, gpsText, articles)
+
+            // Secours automatique : si Claude n'est pas sûr, recherche d'image Google Vision,
+            // puis nouvelle rédaction par Claude à partir des pistes trouvées.
+            if (isUnsure(caption) && !visionKey.isNullOrBlank()) {
+                val hints = runCatching { GoogleVision.identify(visionKey, bitmap) }.getOrDefault(emptyList())
+                if (hints.isNotEmpty()) {
+                    val better = runCatching {
+                        claude.caption(bitmap, book.destination, dateText, address, gpsText, articles, hints)
+                    }.getOrNull()
+                    if (better != null && (caption == null || !isUnsure(better))) caption = better
+                }
+            }
+        }
 
         val best = articles.firstOrNull()
         val wikiSummary = best?.let { WikipediaClient.firstSentences(it.extract) }
@@ -82,6 +93,10 @@ class Annotator(private val context: Context) {
             error = error,
         )
     }
+
+    /** Claude n'a pas répondu, ou a explicitement demandé de préciser l'œuvre/le lieu. */
+    private fun isUnsure(caption: Caption?): Boolean =
+        caption == null || caption.summary.trimStart().startsWith("À préciser", ignoreCase = true)
 
     companion object {
         fun formatDate(millis: Long): String =

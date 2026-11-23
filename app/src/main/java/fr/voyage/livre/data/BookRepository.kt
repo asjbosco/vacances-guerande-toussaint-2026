@@ -51,4 +51,9 @@ class Settings(context: Context) {
     var apiKey: String
         get() = prefs.getString("cle_api", "") ?: ""
         set(value) = prefs.edit().putString("cle_api", value.trim()).apply()
+
+    /** Clé Google Cloud Vision (recherche par l'image), facultative. */
+    var visionKey: String
+        get() = prefs.getString("cle_vision", "") ?: ""
+        set(value) = prefs.edit().putString("cle_vision", value.trim()).apply()
 }

@@ -38,6 +38,7 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
         guessedPlace: String?,
         gps: String?,
         articles: List<WikiArticle>,
+        hints: List<String> = emptyList(),
     ): Caption? = withContext(Dispatchers.IO) {
         val jpeg = ByteArrayOutputStream().use { out ->
             photo.compress(Bitmap.CompressFormat.JPEG, 85, out)
@@ -56,7 +57,7 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
             .addUserMessageOfContentBlockParams(
                 listOf(
                     ContentBlockParam.ofImage(image),
-                    ContentBlockParam.ofText(context(destination, dateText, guessedPlace, gps, articles)),
+                    ContentBlockParam.ofText(context(destination, dateText, guessedPlace, gps, articles, hints)),
                 )
             )
             .build()
@@ -116,6 +117,7 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
         guessedPlace: String?,
         gps: String?,
         articles: List<WikiArticle>,
+        hints: List<String>,
     ): String = buildString {
         appendLine("Voyage : $destination")
         dateText?.let { appendLine("Date de la photo : $it") }
@@ -132,6 +134,12 @@ class ClaudeCaptioner(apiKey: String) : AutoCloseable {
                 appendLine(a.extract.take(2500))
                 appendLine("</article>")
             }
+        }
+        if (hints.isNotEmpty()) {
+            appendLine()
+            appendLine("Pistes d'identification trouvées par recherche d'image (Google Vision), de la plus probable à la moins probable :")
+            hints.forEach { appendLine("- $it") }
+            appendLine("Utilise ces pistes si elles correspondent vraiment à ce que montre la photo ; vérifie leur cohérence et n'invente rien.")
         }
         appendLine()
         append("Rédige la légende de cette photo.")
