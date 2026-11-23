@@ -1,5 +1,7 @@
 package fr.voyage.livre.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,10 +22,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +41,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,6 +66,7 @@ import java.io.File
 fun HomeScreen(state: UiState, vm: BookViewModel) {
     val book = state.book
     var showShare by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -139,7 +145,11 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     itemsIndexed(book.pages, key = { _, p -> p.id }) { index, page ->
-                        PageRow(index, page, state) { vm.open(Screen.Editor(page.id)) }
+                        PageRow(
+                            index, page, state,
+                            onDelete = { pendingDelete = page.id },
+                            onClick = { vm.open(Screen.Editor(page.id)) },
+                        )
                     }
                 }
             }
@@ -155,12 +165,30 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
             vm.share(target)
         }
     }
+
+    pendingDelete?.let { id ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Retirer cette photo du livre ?") },
+            text = { Text("La photo reste dans la galerie du téléphone.") },
+            confirmButton = { TextButton(onClick = { vm.deletePage(id); pendingDelete = null }) { Text("Retirer") } },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Annuler") } },
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PageRow(index: Int, page: BookPage, state: UiState, onClick: () -> Unit) {
+private fun PageRow(index: Int, page: BookPage, state: UiState, onDelete: () -> Unit, onClick: () -> Unit) {
     val names = state.book.participants.filter { it.id in page.participantIds }.joinToString(", ") { it.name }
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    // Appui long → une poubelle apparaît pour retirer la photo ; un simple appui l'annule.
+    var armed by remember { mutableStateOf(false) }
+    Card(
+        modifier = Modifier.fillMaxWidth().combinedClickable(
+            onClick = { if (armed) armed = false else onClick() },
+            onLongClick = { armed = true },
+        ),
+    ) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
                 model = File(page.photoPath),
@@ -184,10 +212,16 @@ private fun PageRow(index: Int, page: BookPage, state: UiState, onClick: () -> U
                     Text("👥 $names", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            when {
-                page.status == AnnotationStatus.RUNNING -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                page.status == AnnotationStatus.ERROR -> Icon(Icons.Default.ErrorOutline, "Erreur", tint = MaterialTheme.colorScheme.error)
-                !page.hasGps -> Icon(Icons.Default.LocationOff, "Pas de GPS", tint = MaterialTheme.colorScheme.outline)
+            if (armed) {
+                IconButton(onClick = { armed = false; onDelete() }) {
+                    Icon(Icons.Default.Delete, "Retirer la photo", tint = MaterialTheme.colorScheme.error)
+                }
+            } else {
+                when {
+                    page.status == AnnotationStatus.RUNNING -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    page.status == AnnotationStatus.ERROR -> Icon(Icons.Default.ErrorOutline, "Erreur", tint = MaterialTheme.colorScheme.error)
+                    !page.hasGps -> Icon(Icons.Default.LocationOff, "Pas de GPS", tint = MaterialTheme.colorScheme.outline)
+                }
             }
         }
     }

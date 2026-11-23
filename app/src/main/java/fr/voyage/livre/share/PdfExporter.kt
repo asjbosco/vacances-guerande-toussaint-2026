@@ -137,6 +137,12 @@ object PdfExporter {
     private const val INTER_CARD = 28f       // entre deux photos empilées
     private const val COL_GAP = 28f          // entre deux photos côte à côte
     private const val MIN_PHOTO_H = 150f     // hauteur mini d'une photo pour accepter d'en mettre deux
+    private const val RULE_OUTER = 1.6f      // filet extérieur (épais)
+    private const val RULE_INNER = 0.8f      // filet intérieur (moitié de l'épaisseur)
+    private const val RULE_GAP = 3f          // écart entre les deux filets
+    private const val CAP_PAD_H = 10f        // marge filet → texte (gauche/droite)
+    private const val CAP_PAD_V = 8f         // marge filet → texte (haut/bas)
+    private const val PHOTO_CAPTION_GAP = 12f // écart photo → cartouche de légende
 
     /**
      * Dispose les photos en tenant compte de leur orientation :
@@ -244,30 +250,58 @@ object PdfExporter {
 
     /**
      * Dessine une photo (ajustée à l'espace restant), centrée dans la colonne [x, x+cardWidth],
-     * puis sa légende juste en dessous, le tout dans la hauteur [maxCardH].
+     * puis la légende DANS un cartouche à double filet, aligné sur la largeur de la photo.
+     * La photo est réduite au besoin pour que l'ensemble tienne dans la hauteur [maxCardH].
      */
     private fun drawCard(canvas: Canvas, book: Book, page: BookPage, x: Float, top: Float, cardWidth: Int, maxCardH: Float) {
-        val blocks = captionBlocks(book, page, cardWidth)
-        val textHeight = blocks.sumOf { it.height }.toFloat() + TEXT_GAP * (blocks.size - 1).coerceAtLeast(0)
-        val photoMaxH = (maxCardH - textHeight - 16f).coerceAtLeast(60f)
+        val photo = PhotoImporter.decodeFileScaled(page.photoPath, PHOTO_MAX_SIDE) ?: return
+        val pw = photo.width.toFloat()
+        val ph = photo.height.toFloat()
+        val insetH = RULE_GAP + CAP_PAD_H
+        val insetV = RULE_GAP + CAP_PAD_V
 
-        var y = top
-        PhotoImporter.decodeFileScaled(page.photoPath, PHOTO_MAX_SIDE)?.let { photo ->
-            val scale = minOf(cardWidth / photo.width.toFloat(), photoMaxH / photo.height.toFloat())
-            val w = photo.width * scale
-            val h = photo.height * scale
-            val left = x + (cardWidth - w) / 2f
-            canvas.drawBitmap(photo, null, RectF(left, y, left + w, y + h), Paint(Paint.FILTER_BITMAP_FLAG))
-            photo.recycle()
-            y += h + 12f
+        // Ajuste la photo pour que photo + cartouche (dont la largeur suit la photo) tiennent.
+        fun textWidthFor(photoW: Float) = (photoW - 2 * insetH).toInt().coerceAtLeast(40)
+        fun boxHeightFor(photoW: Float): Float {
+            val b = captionBlocks(book, page, textWidthFor(photoW))
+            if (b.isEmpty()) return 0f
+            val textH = b.sumOf { it.height }.toFloat() + TEXT_GAP * (b.size - 1).coerceAtLeast(0)
+            return textH + 2 * insetV
         }
 
+        var photoBudget = maxCardH
+        repeat(3) {
+            val scale = minOf(cardWidth / pw, photoBudget / ph)
+            val boxH = boxHeightFor(pw * scale)
+            photoBudget = (maxCardH - PHOTO_CAPTION_GAP - boxH).coerceAtLeast(60f)
+        }
+        val scale = minOf(cardWidth / pw, photoBudget / ph)
+        val photoW = pw * scale
+        val photoH = ph * scale
+        val left = x + (cardWidth - photoW) / 2f
+
+        var y = top
+        canvas.drawBitmap(photo, null, RectF(left, y, left + photoW, y + photoH), Paint(Paint.FILTER_BITMAP_FLAG))
+        photo.recycle()
+        y += photoH + PHOTO_CAPTION_GAP
+
+        val blocks = captionBlocks(book, page, textWidthFor(photoW))
+        if (blocks.isEmpty()) return
+        val textH = blocks.sumOf { it.height }.toFloat() + TEXT_GAP * (blocks.size - 1).coerceAtLeast(0)
+        val boxH = textH + 2 * insetV
+
+        val outer = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = ACCENT; strokeWidth = RULE_OUTER }
+        val inner = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = ACCENT; strokeWidth = RULE_INNER }
+        canvas.drawRect(left, y, left + photoW, y + boxH, outer)
+        canvas.drawRect(left + RULE_GAP, y + RULE_GAP, left + photoW - RULE_GAP, y + boxH - RULE_GAP, inner)
+
+        var ty = y + insetV
         blocks.forEach { l ->
             canvas.save()
-            canvas.translate(x, y)
+            canvas.translate(left + insetH, ty)
             l.draw(canvas)
             canvas.restore()
-            y += l.height + TEXT_GAP
+            ty += l.height + TEXT_GAP
         }
     }
 
