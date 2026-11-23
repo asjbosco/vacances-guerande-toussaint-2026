@@ -51,7 +51,7 @@ object PdfExporter {
         val doc = PdfDocument()
         try {
             drawCover(doc, book, pages)
-            pages.forEachIndexed { i, page -> drawPhotoPage(doc, book, page, i + 2) }
+            drawPhotoPages(doc, book, pages)
             FileOutputStream(file).use { doc.writeTo(it) }
         } finally {
             doc.close()
@@ -132,47 +132,143 @@ object PdfExporter {
 
     // ---------- Pages photo ----------
 
-    private fun drawPhotoPage(doc: PdfDocument, book: Book, page: BookPage, number: Int) {
-        val pdfPage = doc.startPage(PdfDocument.PageInfo.Builder(PAGE_W, PAGE_H, number).create())
-        val canvas = pdfPage.canvas
-        canvas.drawColor(Color.WHITE)
-        val width = (PAGE_W - 2 * MARGIN).toInt()
+    private const val TEXT_GAP = 8f          // entre les lignes de texte d'une légende
+    private const val FOOTER_SPACE = 24f     // place réservée au numéro de page
+    private const val INTER_CARD = 28f       // entre deux photos empilées
+    private const val COL_GAP = 28f          // entre deux photos côte à côte
+    private const val MIN_PHOTO_H = 150f     // hauteur mini d'une photo pour accepter d'en mettre deux
 
-        // Texte d'abord mesuré, pour laisser à la photo toute la place restante.
+    /**
+     * Dispose les photos en tenant compte de leur orientation :
+     *  - deux photos PAYSAGE qui se suivent → l'une au-dessus de l'autre, page verticale ;
+     *  - deux photos PORTRAIT qui se suivent → côte à côte, page tournée en paysage ;
+     *  - sinon une seule photo sur la page (format vertical).
+     * On ne met deux photos que si leurs légendes laissent la place à une photo lisible.
+     */
+    private fun drawPhotoPages(doc: PdfDocument, book: Book, pages: List<BookPage>) {
+        // Page verticale (empilement)
+        val vContentW = (PAGE_W - 2 * MARGIN).toInt()
+        val vAvailH = PAGE_H - 2 * MARGIN - FOOTER_SPACE
+        val stackSlotH = (vAvailH - INTER_CARD) / 2f
+        // Page tournée en paysage (côte à côte)
+        val lContentW = (PAGE_H - 2 * MARGIN).toInt()
+        val lAvailH = PAGE_W - 2 * MARGIN - FOOTER_SPACE
+        val colW = ((lContentW - COL_GAP) / 2f).toInt()
+
+        var i = 0
+        var number = 2
+        while (i < pages.size) {
+            val a = pages[i]
+            val b = pages.getOrNull(i + 1)
+            val aPortrait = isPortrait(a)
+            val bPortrait = b?.let { isPortrait(it) }
+
+            val twoLandscape = b != null && !aPortrait && bPortrait == false &&
+                captionHeight(book, a, vContentW) <= stackSlotH - MIN_PHOTO_H &&
+                captionHeight(book, b, vContentW) <= stackSlotH - MIN_PHOTO_H
+            val twoPortrait = b != null && aPortrait && bPortrait == true &&
+                captionHeight(book, a, colW) <= lAvailH - MIN_PHOTO_H &&
+                captionHeight(book, b, colW) <= lAvailH - MIN_PHOTO_H
+
+            when {
+                twoLandscape -> {
+                    val page = startPage(doc, number, landscape = false)
+                    drawCard(page.canvas, book, a, MARGIN, MARGIN, vContentW, stackSlotH)
+                    val sepY = MARGIN + stackSlotH + INTER_CARD / 2f
+                    page.canvas.drawLine(
+                        MARGIN, sepY, PAGE_W - MARGIN, sepY,
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = MUTED; strokeWidth = 0.5f },
+                    )
+                    drawCard(page.canvas, book, b!!, MARGIN, MARGIN + stackSlotH + INTER_CARD, vContentW, stackSlotH)
+                    footer(page.canvas, number, PAGE_W, PAGE_H)
+                    doc.finishPage(page)
+                    i += 2
+                }
+                twoPortrait -> {
+                    val page = startPage(doc, number, landscape = true)
+                    drawCard(page.canvas, book, a, MARGIN, MARGIN, colW, lAvailH)
+                    drawCard(page.canvas, book, b!!, MARGIN + colW + COL_GAP, MARGIN, colW, lAvailH)
+                    footer(page.canvas, number, PAGE_H, PAGE_W)
+                    doc.finishPage(page)
+                    i += 2
+                }
+                else -> {
+                    val page = startPage(doc, number, landscape = false)
+                    drawCard(page.canvas, book, a, MARGIN, MARGIN, vContentW, vAvailH)
+                    footer(page.canvas, number, PAGE_W, PAGE_H)
+                    doc.finishPage(page)
+                    i += 1
+                }
+            }
+            number++
+        }
+    }
+
+    private fun startPage(doc: PdfDocument, number: Int, landscape: Boolean): PdfDocument.Page {
+        val w = if (landscape) PAGE_H else PAGE_W
+        val h = if (landscape) PAGE_W else PAGE_H
+        val page = doc.startPage(PdfDocument.PageInfo.Builder(w, h, number).create())
+        page.canvas.drawColor(Color.WHITE)
+        return page
+    }
+
+    private fun footer(canvas: Canvas, number: Int, pageW: Int, pageH: Int) {
+        drawText(
+            canvas, "$number", sans(9f, color = MUTED),
+            MARGIN, pageH - MARGIN + 8f, (pageW - 2 * MARGIN).toInt(), Layout.Alignment.ALIGN_CENTER,
+        )
+    }
+
+    /** Portrait = plus haute que large (orientation déjà appliquée à l'import). */
+    private fun isPortrait(page: BookPage): Boolean {
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(page.photoPath, o)
+        return o.outWidth > 0 && o.outHeight > o.outWidth
+    }
+
+    /** Les lignes de texte d'une légende (lieu, date, résumé, « Avec … »). */
+    private fun captionBlocks(book: Book, page: BookPage, width: Int): List<StaticLayout> {
         val names = book.participants.filter { it.id in page.participantIds }.map { it.name }
-        val blocks = listOfNotNull(
+        return listOfNotNull(
             layout(page.place, serif(18f, bold = true, color = ACCENT), width),
             page.takenAt?.let { layout(Annotator.formatDate(it).replaceFirstChar(Char::uppercase), sans(10f, italic = true, color = MUTED), width) },
             layout(page.summary, serif(12f, color = INK), width),
             names.takeIf { it.isNotEmpty() }?.let { layout("Avec ${it.joinToString(", ")}", serif(12f, italic = true, color = INK), width) },
         )
-        val gap = 8f
-        val footerSpace = 24f
-        val textHeight = blocks.sumOf { it.height } + gap * (blocks.size - 1).coerceAtLeast(0)
-        val photoMaxH = (PAGE_H - 2 * MARGIN - footerSpace - textHeight - 20f).coerceAtLeast(PAGE_H * 0.35f)
+    }
 
-        var y = MARGIN
+    private fun captionHeight(book: Book, page: BookPage, width: Int): Float {
+        val blocks = captionBlocks(book, page, width)
+        return blocks.sumOf { it.height }.toFloat() + TEXT_GAP * (blocks.size - 1).coerceAtLeast(0)
+    }
+
+    /**
+     * Dessine une photo (ajustée à l'espace restant), centrée dans la colonne [x, x+cardWidth],
+     * puis sa légende juste en dessous, le tout dans la hauteur [maxCardH].
+     */
+    private fun drawCard(canvas: Canvas, book: Book, page: BookPage, x: Float, top: Float, cardWidth: Int, maxCardH: Float) {
+        val blocks = captionBlocks(book, page, cardWidth)
+        val textHeight = blocks.sumOf { it.height }.toFloat() + TEXT_GAP * (blocks.size - 1).coerceAtLeast(0)
+        val photoMaxH = (maxCardH - textHeight - 16f).coerceAtLeast(60f)
+
+        var y = top
         PhotoImporter.decodeFileScaled(page.photoPath, PHOTO_MAX_SIDE)?.let { photo ->
-            val scale = minOf(width / photo.width.toFloat(), photoMaxH / photo.height.toFloat())
+            val scale = minOf(cardWidth / photo.width.toFloat(), photoMaxH / photo.height.toFloat())
             val w = photo.width * scale
             val h = photo.height * scale
-            val left = (PAGE_W - w) / 2f
+            val left = x + (cardWidth - w) / 2f
             canvas.drawBitmap(photo, null, RectF(left, y, left + w, y + h), Paint(Paint.FILTER_BITMAP_FLAG))
             photo.recycle()
-            y += h + 20f
+            y += h + 12f
         }
 
         blocks.forEach { l ->
             canvas.save()
-            canvas.translate(MARGIN, y)
+            canvas.translate(x, y)
             l.draw(canvas)
             canvas.restore()
-            y += l.height + gap
+            y += l.height + TEXT_GAP
         }
-
-        // Numéro de page
-        drawText(canvas, "$number", sans(9f, color = MUTED), MARGIN, PAGE_H - MARGIN + 8f, width, Layout.Alignment.ALIGN_CENTER)
-        doc.finishPage(pdfPage)
     }
 
     // ---------- Outils de dessin ----------

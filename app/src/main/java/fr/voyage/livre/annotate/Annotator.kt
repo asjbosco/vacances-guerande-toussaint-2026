@@ -4,17 +4,23 @@ import android.content.Context
 import fr.voyage.livre.data.AnnotationStatus
 import fr.voyage.livre.data.Book
 import fr.voyage.livre.data.BookPage
+import fr.voyage.livre.data.CaptionSource
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
  * Annote une page : lieu (GPS → adresse), articles Wikipédia proches,
- * puis légende rédigée par Claude (ou extrait Wikipédia si pas de clé API).
+ * puis légende rédigée par Claude (ou extrait Wikipédia selon la source choisie).
  */
 class Annotator(private val context: Context) {
 
-    suspend fun annotate(page: BookPage, book: Book, captioner: ClaudeCaptioner?): BookPage {
+    suspend fun annotate(
+        page: BookPage,
+        book: Book,
+        captioner: ClaudeCaptioner?,
+        source: CaptionSource = CaptionSource.AUTO,
+    ): BookPage {
         val lat = page.latitude
         val lon = page.longitude
 
@@ -28,10 +34,12 @@ class Annotator(private val context: Context) {
             }
         }.getOrDefault(emptyList())
 
-        val caption = captioner?.let { claude ->
+        // Wikipédia explicitement demandé → on n'appelle pas Claude.
+        val useClaude = captioner != null && source != CaptionSource.WIKIPEDIA
+        val caption = if (useClaude) {
             val bitmap = PhotoImporter.decodeFileScaled(page.photoPath, 1568)
                 ?: error("Photo introuvable")
-            claude.caption(
+            captioner!!.caption(
                 photo = bitmap.forVision(),
                 destination = book.destination,
                 dateText = page.takenAt?.let { formatDate(it) },
@@ -39,23 +47,39 @@ class Annotator(private val context: Context) {
                 gps = if (lat != null && lon != null) "%.5f, %.5f".format(Locale.US, lat, lon) else null,
                 articles = articles,
             )
-        }
+        } else null
 
         val best = articles.firstOrNull()
+        val wikiSummary = best?.let { WikipediaClient.firstSentences(it.extract) }
+
         val place = caption?.place?.takeIf { it.isNotBlank() }
             ?: address
             ?: best?.title
             ?: page.place
-        val summary = caption?.summary
-            ?: best?.let { WikipediaClient.firstSentences(it.extract) }
-            ?: page.summary
+        val summary = caption?.summary ?: wikiSummary ?: page.summary
+        val textSource = when {
+            caption != null -> "claude"
+            wikiSummary != null -> "wikipedia"
+            else -> page.textSource
+        }
+
+        val error = when {
+            // Wikipédia demandé mais rien trouvé pour cet endroit.
+            source == CaptionSource.WIKIPEDIA && wikiSummary == null ->
+                "Aucun article Wikipédia trouvé pour cet endroit."
+            // Claude attendu mais pas de réponse → repli Wikipédia.
+            useClaude && caption == null && wikiSummary != null ->
+                "Claude n'a pas répondu : texte repris de Wikipédia."
+            else -> null
+        }
 
         return page.copy(
             place = place,
             summary = summary,
             wikiTitle = best?.title.orEmpty(),
+            textSource = textSource,
             status = AnnotationStatus.DONE,
-            error = if (caption == null && captioner != null) "Claude n'a pas répondu : texte repris de Wikipédia." else null,
+            error = error,
         )
     }
 

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import fr.voyage.livre.annotate.Annotator
 import fr.voyage.livre.data.AnnotationStatus
+import fr.voyage.livre.data.CaptionSource
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -93,18 +95,39 @@ fun EditorScreen(state: UiState, vm: BookViewModel, pageId: String) {
                 page.takenAt?.let { Annotator.formatDate(it) },
                 if (page.hasGps) "📍 position GPS connue" else "pas de position GPS",
                 page.wikiTitle.takeIf { it.isNotBlank() }?.let { "Wikipédia : $it" },
+                when (page.textSource) {
+                    "claude" -> "Texte : Claude"
+                    "wikipedia" -> "Texte : Wikipédia"
+                    else -> null
+                },
             ).joinToString(" · ")
             Text(info, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
             page.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 
             BusyBanner(state.busyMessage)
-            FilledTonalButton(
-                onClick = { vm.annotateOne(page.id) },
-                enabled = state.busyMessage == null,
-            ) {
-                Icon(Icons.Default.AutoAwesome, null)
-                Spacer(Modifier.width(8.dp))
-                Text(if (page.status == AnnotationStatus.DONE) "Réécrire la légende" else "Rédiger la légende")
+            Text(
+                if (page.status == AnnotationStatus.DONE) "Réécrire la légende avec :" else "Rédiger la légende avec :",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(
+                    onClick = { vm.annotateOne(page.id, CaptionSource.CLAUDE) },
+                    enabled = state.busyMessage == null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.AutoAwesome, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Claude")
+                }
+                FilledTonalButton(
+                    onClick = { vm.annotateOne(page.id, CaptionSource.WIKIPEDIA) },
+                    enabled = state.busyMessage == null,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(Icons.Default.Public, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Wikipédia")
+                }
             }
 
             OutlinedTextField(

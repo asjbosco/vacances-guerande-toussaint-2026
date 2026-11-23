@@ -13,6 +13,7 @@ import fr.voyage.livre.data.AnnotationStatus
 import fr.voyage.livre.data.Book
 import fr.voyage.livre.data.BookPage
 import fr.voyage.livre.data.BookRepository
+import fr.voyage.livre.data.CaptionSource
 import fr.voyage.livre.data.Participant
 import fr.voyage.livre.data.Settings
 import fr.voyage.livre.share.PdfExporter
@@ -127,21 +128,29 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         annotate(pages.map { it.id })
     }
 
-    fun annotateOne(pageId: String) = annotate(listOf(pageId))
+    fun annotateOne(pageId: String, source: CaptionSource = CaptionSource.AUTO) = annotate(listOf(pageId), source)
 
-    private fun annotate(ids: List<String>) {
+    private fun annotate(ids: List<String>, source: CaptionSource = CaptionSource.AUTO) {
         if (ids.isEmpty()) { say("Toutes les photos sont déjà annotées."); return }
         if (annotateJob?.isActive == true) return
+        val key = settings.apiKey
+        if (source == CaptionSource.CLAUDE && key.isBlank()) {
+            say("Ajoutez d'abord votre clé API Claude dans les réglages (⚙️).")
+            return
+        }
         annotateJob = viewModelScope.launch {
-            val key = settings.apiKey
-            val captioner = key.takeIf { it.isNotBlank() }?.let { ClaudeCaptioner(it) }
-            if (captioner == null) say("Pas de clé API Claude : les textes viendront seulement de Wikipédia.")
+            // Pour Wikipédia on n'ouvre pas de connexion à Claude.
+            val captioner = if (source == CaptionSource.WIKIPEDIA) null
+                else key.takeIf { it.isNotBlank() }?.let { ClaudeCaptioner(it) }
+            if (source == CaptionSource.AUTO && captioner == null) {
+                say("Pas de clé API Claude : les textes viendront seulement de Wikipédia.")
+            }
             try {
                 ids.forEachIndexed { i, id ->
                     val page = _state.value.book.pages.firstOrNull { it.id == id } ?: return@forEachIndexed
                     _state.update { it.copy(busyMessage = "Rédaction des légendes… ${i + 1}/${ids.size}") }
                     editPage(id) { it.copy(status = AnnotationStatus.RUNNING, error = null) }
-                    val result = runCatching { annotator.annotate(page, _state.value.book, captioner) }
+                    val result = runCatching { annotator.annotate(page, _state.value.book, captioner, source) }
                     result.onSuccess { updated ->
                         // Garde les personnes cochées pendant l'annotation.
                         editPage(id) { current -> updated.copy(participantIds = current.participantIds) }

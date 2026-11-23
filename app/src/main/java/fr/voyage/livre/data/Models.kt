@@ -13,6 +13,15 @@ data class Participant(
 @Serializable
 enum class AnnotationStatus { TODO, RUNNING, DONE, ERROR }
 
+/**
+ * Source choisie pour rédiger une légende :
+ * - AUTO : Claude si une clé API est enregistrée, sinon Wikipédia (comportement par défaut) ;
+ * - CLAUDE : forcer la rédaction par Claude ;
+ * - WIKIPEDIA : reprendre le début de l'article Wikipédia, sans Claude.
+ */
+@Serializable
+enum class CaptionSource { AUTO, CLAUDE, WIKIPEDIA }
+
 @Serializable
 data class BookPage(
     val id: String = UUID.randomUUID().toString(),
@@ -26,6 +35,8 @@ data class BookPage(
     val place: String = "",
     val summary: String = "",
     val wikiTitle: String = "",
+    /** Qui a rédigé le texte actuel : "claude", "wikipedia" ou "" (pas encore). */
+    val textSource: String = "",
     val participantIds: List<String> = emptyList(),
     val status: AnnotationStatus = AnnotationStatus.TODO,
     val error: String? = null,
