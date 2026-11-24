@@ -15,8 +15,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.voyage.livre.ui.BookViewModel
+import fr.voyage.livre.ui.CropScreen
 import fr.voyage.livre.ui.EditorScreen
 import fr.voyage.livre.ui.HomeScreen
+import fr.voyage.livre.ui.PdfPreviewScreen
 import fr.voyage.livre.ui.PickerScreen
 import fr.voyage.livre.ui.Screen
 import fr.voyage.livre.ui.SettingsScreen
@@ -37,7 +39,9 @@ class MainActivity : ComponentActivity() {
                     Screen.Home -> HomeScreen(state, viewModel)
                     Screen.Picker -> PickerScreen(state, viewModel)
                     is Screen.Editor -> EditorScreen(state, viewModel, s.pageId)
+                    is Screen.Crop -> CropScreen(state, viewModel, s.pageId)
                     is Screen.Viewer -> ViewerScreen(state, viewModel, s.startIndex)
+                    Screen.PdfPreview -> PdfPreviewScreen(state, viewModel)
                     Screen.Settings -> SettingsScreen(state, viewModel)
                 }
             }

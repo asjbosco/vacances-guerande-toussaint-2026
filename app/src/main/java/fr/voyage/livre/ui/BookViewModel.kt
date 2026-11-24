@@ -35,7 +35,9 @@ sealed interface Screen {
     data object Home : Screen
     data object Picker : Screen
     data class Editor(val pageId: String) : Screen
+    data class Crop(val pageId: String) : Screen
     data class Viewer(val startIndex: Int = 0) : Screen
+    data object PdfPreview : Screen
     data object Settings : Screen
 }
 
@@ -49,6 +51,8 @@ data class UiState(
     val message: String? = null,
     val apiKeySet: Boolean = false,
     val visionKeySet: Boolean = false,
+    /** Chemin du dernier PDF fabriqué (pour l'aperçu avant partage). */
+    val pdfFile: String? = null,
 )
 
 class BookViewModel(app: Application) : AndroidViewModel(app) {
@@ -236,6 +240,19 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         open(Screen.Home)
     }
 
+    /** Recadre une photo selon un rectangle en fractions (0..1) de l'image. */
+    fun cropPhoto(pageId: String, left: Float, top: Float, right: Float, bottom: Float) {
+        val page = _state.value.book.pages.firstOrNull { it.id == pageId } ?: return
+        viewModelScope.launch {
+            val newPath = PhotoImporter.cropToNewFile(page.photoPath, left, top, right, bottom, repo.photosDir)
+            if (newPath == null) { say("Recadrage impossible."); return@launch }
+            val old = page.photoPath
+            editPage(pageId) { it.copy(photoPath = newPath) }
+            File(old).delete()
+            open(Screen.Editor(pageId))
+        }
+    }
+
     /** Fait pivoter une photo de ±90° (redresser). */
     fun rotatePhoto(pageId: String, degrees: Int) {
         val page = _state.value.book.pages.firstOrNull { it.id == pageId } ?: return
@@ -309,18 +326,24 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Fabrique le livre en PDF imprimable (A4) puis propose de l'enregistrer ou de l'envoyer. */
+    /** Fabrique le livre en PDF imprimable (A4) puis ouvre l'aperçu avant partage. */
     fun exportPdf() {
         val book = _state.value.book
         if (book.pages.isEmpty()) { say("Aucune photo dans le livre."); return }
         viewModelScope.launch {
             _state.update { it.copy(busyMessage = "Fabrication du PDF…") }
-            runCatching {
-                val file = PdfExporter.export(getApplication(), book, book.pages)
-                PdfExporter.share(getApplication(), file, book)
-            }.onFailure { say("PDF impossible : ${it.message}") }
-            _state.update { it.copy(busyMessage = null) }
+            val file = runCatching { PdfExporter.export(getApplication(), book, book.pages) }
+                .getOrElse { say("PDF impossible : ${it.message}"); null }
+            _state.update { it.copy(busyMessage = null, pdfFile = file?.absolutePath) }
+            if (file != null) open(Screen.PdfPreview)
         }
+    }
+
+    /** Partage (enregistrer / envoyer / imprimer) le PDF déjà fabriqué et prévisualisé. */
+    fun sharePdf() {
+        val path = _state.value.pdfFile ?: return
+        runCatching { PdfExporter.share(getApplication(), File(path), _state.value.book) }
+            .onFailure { say("Partage impossible : ${it.message}") }
     }
 
     companion object {

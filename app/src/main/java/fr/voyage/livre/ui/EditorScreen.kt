@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Public
@@ -112,6 +113,11 @@ fun EditorScreen(state: UiState, vm: BookViewModel, pageId: String) {
                     Icon(Icons.Default.RotateRight, null)
                     Spacer(Modifier.width(6.dp))
                     Text("Pivoter →")
+                }
+                FilledTonalButton(onClick = { vm.open(Screen.Crop(page.id)) }, enabled = state.busyMessage == null) {
+                    Icon(Icons.Default.Crop, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Rogner")
                 }
             }
             FilledTonalButton(
