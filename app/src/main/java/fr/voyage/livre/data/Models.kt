@@ -46,12 +46,12 @@ data class BookPage(
 
 @Serializable
 data class Book(
-    val title: String = "Vacances à Guérande – Toussaint 2026",
+    val title: String = "",
     /** Région du voyage : aide à retrouver le lieu quand une photo n'a pas de GPS. */
-    val destination: String = "Guérande et la presqu'île guérandaise (Loire-Atlantique)",
-    /** Dates au format jj/mm/aaaa, utilisées pour filtrer la galerie. */
-    val startDate: String = "17/10/2026",
-    val endDate: String = "02/11/2026",
+    val destination: String = "",
+    /** Dates au format jj/mm/aaaa (facultatives). Vides = toutes les photos sont accessibles. */
+    val startDate: String = "",
+    val endDate: String = "",
     val participants: List<Participant> = DEFAULT_PARTICIPANTS,
     val pages: List<BookPage> = emptyList(),
 )

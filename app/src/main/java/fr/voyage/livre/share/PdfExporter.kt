@@ -136,7 +136,6 @@ object PdfExporter {
     private const val FOOTER_SPACE = 24f     // place réservée au numéro de page
     private const val INTER_CARD = 28f       // entre deux photos empilées
     private const val COL_GAP = 28f          // entre deux photos côte à côte
-    private const val MIN_PHOTO_H = 150f     // hauteur mini d'une photo pour accepter d'en mettre deux
     private const val RULE_OUTER = 1.6f      // filet extérieur (épais)
     private const val RULE_INNER = 0.8f      // filet intérieur (moitié de l'épaisseur)
     private const val RULE_GAP = 3f          // écart entre les deux filets
@@ -169,12 +168,10 @@ object PdfExporter {
             val aPortrait = isPortrait(a)
             val bPortrait = b?.let { isPortrait(it) }
 
-            val twoLandscape = b != null && !aPortrait && bPortrait == false &&
-                captionHeight(book, a, vContentW) <= stackSlotH - MIN_PHOTO_H &&
-                captionHeight(book, b, vContentW) <= stackSlotH - MIN_PHOTO_H
-            val twoPortrait = b != null && aPortrait && bPortrait == true &&
-                captionHeight(book, a, colW) <= lAvailH - MIN_PHOTO_H &&
-                captionHeight(book, b, colW) <= lAvailH - MIN_PHOTO_H
+            // Appariement par simple orientation : la mise en page garantit ensuite une
+            // photo bien dimensionnée et une légende qui tient dessous.
+            val twoLandscape = b != null && !aPortrait && bPortrait == false
+            val twoPortrait = b != null && aPortrait && bPortrait == true
 
             when {
                 twoLandscape -> {
@@ -232,21 +229,19 @@ object PdfExporter {
         return o.outWidth > 0 && o.outHeight > o.outWidth
     }
 
-    /** Les lignes de texte d'une légende (lieu, date, résumé, « Avec … »). */
-    private fun captionBlocks(book: Book, page: BookPage, width: Int): List<StaticLayout> {
+    /** Les lignes de texte d'une légende (lieu, date, résumé, « Avec … »), à l'échelle de police donnée. */
+    private fun captionBlocks(book: Book, page: BookPage, width: Int, scale: Float = 1f): List<StaticLayout> {
         val names = book.participants.filter { it.id in page.participantIds }.map { it.name }
         return listOfNotNull(
-            layout(page.place, serif(18f, bold = true, color = ACCENT), width),
-            page.takenAt?.let { layout(Annotator.formatDate(it).replaceFirstChar(Char::uppercase), sans(10f, italic = true, color = MUTED), width) },
-            layout(page.summary, serif(12f, color = INK), width),
-            names.takeIf { it.isNotEmpty() }?.let { layout("Avec ${it.joinToString(", ")}", serif(12f, italic = true, color = INK), width) },
+            layout(page.place, serif(18f * scale, bold = true, color = ACCENT), width),
+            page.takenAt?.let { layout(Annotator.formatDate(it).replaceFirstChar(Char::uppercase), sans(10f * scale, italic = true, color = MUTED), width) },
+            layout(page.summary, serif(12f * scale, color = INK), width),
+            names.takeIf { it.isNotEmpty() }?.let { layout("Avec ${it.joinToString(", ")}", serif(12f * scale, italic = true, color = INK), width) },
         )
     }
 
-    private fun captionHeight(book: Book, page: BookPage, width: Int): Float {
-        val blocks = captionBlocks(book, page, width)
-        return blocks.sumOf { it.height }.toFloat() + TEXT_GAP * (blocks.size - 1).coerceAtLeast(0)
-    }
+    private fun blocksHeight(blocks: List<StaticLayout>): Float =
+        blocks.sumOf { it.height }.toFloat() + TEXT_GAP * (blocks.size - 1).coerceAtLeast(0)
 
     /**
      * Dessine une photo (ajustée à l'espace restant), centrée dans la colonne [x, x+cardWidth],
@@ -260,41 +255,41 @@ object PdfExporter {
         val insetH = RULE_GAP + CAP_PAD_H
         val insetV = RULE_GAP + CAP_PAD_V
 
-        // Ajuste la photo pour que photo + cartouche (dont la largeur suit la photo) tiennent.
-        fun textWidthFor(photoW: Float) = (photoW - 2 * insetH).toInt().coerceAtLeast(40)
-        fun boxHeightFor(photoW: Float): Float {
-            val b = captionBlocks(book, page, textWidthFor(photoW))
-            if (b.isEmpty()) return 0f
-            val textH = b.sumOf { it.height }.toFloat() + TEXT_GAP * (b.size - 1).coerceAtLeast(0)
-            return textH + 2 * insetV
-        }
-
-        var photoBudget = maxCardH
-        repeat(3) {
-            val scale = minOf(cardWidth / pw, photoBudget / ph)
-            val boxH = boxHeightFor(pw * scale)
-            photoBudget = (maxCardH - PHOTO_CAPTION_GAP - boxH).coerceAtLeast(60f)
-        }
-        val scale = minOf(cardWidth / pw, photoBudget / ph)
+        // 1) Photo d'abord : limitée par la largeur de la colonne et par ~68 % de la hauteur dispo.
+        val scale = minOf(cardWidth / pw, (maxCardH * 0.68f) / ph)
         val photoW = pw * scale
         val photoH = ph * scale
         val left = x + (cardWidth - photoW) / 2f
 
+        // 2) Place restante pour le cartouche de légende, aligné sur la largeur de la photo.
+        val captionAreaH = (maxCardH - photoH - PHOTO_CAPTION_GAP).coerceAtLeast(0f)
+        val textW = (photoW - 2 * insetH).toInt().coerceAtLeast(40)
+
+        // 3) Taille de police réduite au besoin pour que la légende tienne dans la place restante.
+        var fontScale = 1.0f
+        var blocks = captionBlocks(book, page, textW, fontScale)
+        while (blocksHeight(blocks) + 2 * insetV > captionAreaH && fontScale > 0.7f) {
+            fontScale -= 0.1f
+            blocks = captionBlocks(book, page, textW, fontScale)
+        }
+        val boxH = (blocksHeight(blocks) + 2 * insetV).coerceAtMost(captionAreaH)
+
+        // Dessin : la photo en haut…
         var y = top
         canvas.drawBitmap(photo, null, RectF(left, y, left + photoW, y + photoH), Paint(Paint.FILTER_BITMAP_FLAG))
         photo.recycle()
         y += photoH + PHOTO_CAPTION_GAP
 
-        val blocks = captionBlocks(book, page, textWidthFor(photoW))
-        if (blocks.isEmpty()) return
-        val textH = blocks.sumOf { it.height }.toFloat() + TEXT_GAP * (blocks.size - 1).coerceAtLeast(0)
-        val boxH = textH + 2 * insetV
-
+        // …puis le cartouche (double filet) s'il reste assez de place.
+        if (blocks.isEmpty() || captionAreaH < 2 * insetV + 6f) return
         val outer = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = ACCENT; strokeWidth = RULE_OUTER }
         val inner = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = ACCENT; strokeWidth = RULE_INNER }
         canvas.drawRect(left, y, left + photoW, y + boxH, outer)
         canvas.drawRect(left + RULE_GAP, y + RULE_GAP, left + photoW - RULE_GAP, y + boxH - RULE_GAP, inner)
 
+        // Texte à l'intérieur du cartouche, découpé proprement si jamais il dépassait.
+        canvas.save()
+        canvas.clipRect(left + insetH, y + insetV, left + photoW - insetH, y + boxH - insetV)
         var ty = y + insetV
         blocks.forEach { l ->
             canvas.save()
@@ -303,6 +298,7 @@ object PdfExporter {
             canvas.restore()
             ty += l.height + TEXT_GAP
         }
+        canvas.restore()
     }
 
     // ---------- Outils de dessin ----------

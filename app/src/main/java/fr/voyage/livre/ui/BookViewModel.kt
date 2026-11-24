@@ -1,6 +1,7 @@
 package fr.voyage.livre.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import fr.voyage.livre.annotate.Annotator
@@ -19,6 +20,7 @@ import fr.voyage.livre.data.Settings
 import fr.voyage.livre.share.PdfExporter
 import fr.voyage.livre.share.ShareHelper
 import fr.voyage.livre.share.ShareTarget
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -65,7 +67,11 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch {
             val book = repo.load()
-            _state.update { it.copy(book = book, loaded = true) }
+            // Livre tout neuf → on invite d'abord à renseigner le voyage (titre, région, dates).
+            val firstRun = book.pages.isEmpty() && book.title.isBlank() && book.destination.isBlank()
+            _state.update {
+                it.copy(book = book, loaded = true, screen = if (firstRun) Screen.Settings else it.screen)
+            }
         }
     }
 
@@ -133,6 +139,9 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
 
     fun annotateOne(pageId: String, source: CaptionSource = CaptionSource.AUTO) = annotate(listOf(pageId), source)
 
+    /** Rédige (ou réécrit) les légendes de plusieurs photos d'un coup, avec la source choisie. */
+    fun annotateSelection(ids: List<String>, source: CaptionSource) = annotate(ids, source)
+
     private fun annotate(ids: List<String>, source: CaptionSource = CaptionSource.AUTO) {
         if (ids.isEmpty()) { say("Toutes les photos sont déjà annotées."); return }
         if (annotateJob?.isActive == true) return
@@ -149,25 +158,29 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
                 say("Pas de clé API Claude : les textes viendront seulement de Wikipédia.")
             }
             try {
+                var failures = 0
                 ids.forEachIndexed { i, id ->
                     val page = _state.value.book.pages.firstOrNull { it.id == id } ?: return@forEachIndexed
                     _state.update { it.copy(busyMessage = "Rédaction des légendes… ${i + 1}/${ids.size}") }
                     editPage(id) { it.copy(status = AnnotationStatus.RUNNING, error = null) }
-                    val result = runCatching { annotator.annotate(page, _state.value.book, captioner, source, settings.visionKey) }
-                    result.onSuccess { updated ->
+                    try {
+                        val updated = annotator.annotate(page, _state.value.book, captioner, source, settings.visionKey)
                         // Garde les personnes cochées pendant l'annotation.
                         editPage(id) { current -> updated.copy(participantIds = current.participantIds) }
-                    }.onFailure { e ->
-                        editPage(id) { it.copy(status = AnnotationStatus.ERROR, error = e.message) }
-                        if (e is CaptionException) {
-                            say(e.message ?: "Erreur")
-                            // Une clé invalide ou l'absence de réseau bloquerait toutes les photos.
-                            ids.drop(i + 1).forEach { rest -> editPage(rest) { it.copy(status = AnnotationStatus.TODO) } }
-                            return@launch
-                        }
+                    } catch (c: CancellationException) {
+                        throw c
+                    } catch (t: Throwable) {
+                        // Aucune photo ne doit bloquer le lot : on note l'erreur et on continue.
+                        failures++
+                        Log.e("LivreDeVoyage", "Échec annotation photo $id", t)
+                        val code = (t.message ?: t.javaClass.simpleName).replace('\n', ' ').take(160)
+                        editPage(id) { it.copy(status = AnnotationStatus.ERROR, error = "Échec : $code") }
                     }
                 }
-                say("Légendes prêtes ! Relisez-les et cochez les participants.")
+                say(
+                    if (failures == 0) "Légendes prêtes ! Relisez-les et cochez les participants."
+                    else "Terminé : $failures photo(s) en échec — le détail s'affiche en rouge sur chacune."
+                )
             } finally {
                 captioner?.close()
                 _state.update { it.copy(busyMessage = null) }
@@ -223,6 +236,18 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
         open(Screen.Home)
     }
 
+    /** Fait pivoter une photo de ±90° (redresser). */
+    fun rotatePhoto(pageId: String, degrees: Int) {
+        val page = _state.value.book.pages.firstOrNull { it.id == pageId } ?: return
+        viewModelScope.launch {
+            val newPath = PhotoImporter.rotateToNewFile(page.photoPath, degrees, repo.photosDir)
+            if (newPath == null) { say("Rotation impossible."); return@launch }
+            val old = page.photoPath
+            editPage(pageId) { it.copy(photoPath = newPath) }
+            File(old).delete()
+        }
+    }
+
     fun movePage(id: String, delta: Int) = editBook { b ->
         val list = b.pages.toMutableList()
         val i = list.indexOfFirst { it.id == id }
@@ -235,8 +260,11 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Réglages ----------
 
     fun saveBookInfo(title: String, destination: String, start: String, end: String) {
-        if (parseDate(start) == null || parseDate(end) == null) {
-            say("Dates attendues au format jj/mm/aaaa")
+        // Les dates sont facultatives : vides = aucune limite (toutes les photos).
+        val startOk = start.isBlank() || parseDate(start) != null
+        val endOk = end.isBlank() || parseDate(end) != null
+        if (!startOk || !endOk) {
+            say("Dates attendues au format jj/mm/aaaa (ou laissez vide)")
             return
         }
         editBook { it.copy(title = title.trim(), destination = destination.trim(), startDate = start.trim(), endDate = end.trim()) }

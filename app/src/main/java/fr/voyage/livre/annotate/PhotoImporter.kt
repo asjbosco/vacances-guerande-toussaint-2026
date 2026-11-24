@@ -102,6 +102,20 @@ object PhotoImporter {
         )
     }
 
+    /**
+     * Fait pivoter la photo de [degrees] (±90) et l'écrit dans un NOUVEAU fichier
+     * (nouveau nom), pour forcer le rafraîchissement de l'affichage. Renvoie le nouveau chemin.
+     */
+    suspend fun rotateToNewFile(srcPath: String, degrees: Int, photosDir: File): String? =
+        withContext(Dispatchers.IO) {
+            val bmp = BitmapFactory.decodeFile(srcPath) ?: return@withContext null
+            val m = Matrix().apply { postRotate(degrees.toFloat()) }
+            val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+            val out = File(photosDir, UUID.randomUUID().toString() + ".jpg")
+            FileOutputStream(out).use { rotated.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            out.absolutePath
+        }
+
     fun decodeFileScaled(path: String, maxSide: Int): Bitmap? =
         decodeScaledFromFile(File(path), maxSide)
 

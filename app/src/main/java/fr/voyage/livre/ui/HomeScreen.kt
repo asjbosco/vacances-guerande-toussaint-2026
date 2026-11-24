@@ -22,9 +22,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.LocationOff
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
@@ -59,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import fr.voyage.livre.data.AnnotationStatus
 import fr.voyage.livre.data.BookPage
+import fr.voyage.livre.data.CaptionSource
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,18 +71,32 @@ import java.io.File
 fun HomeScreen(state: UiState, vm: BookViewModel) {
     val book = state.book
     var showShare by remember { mutableStateOf(false) }
-    var pendingDelete by remember { mutableStateOf<String?>(null) }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var confirmDeleteSelection by remember { mutableStateOf(false) }
+    val selectionMode = selected.isNotEmpty()
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(book.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                actions = {
-                    IconButton(onClick = { vm.open(Screen.Settings) }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Réglages")
-                    }
-                },
-            )
+            if (selectionMode) {
+                TopAppBar(
+                    title = { Text("${selected.size} sélectionnée(s)") },
+                    navigationIcon = {
+                        IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, "Annuler la sélection") }
+                    },
+                    actions = {
+                        TextButton(onClick = { selected = book.pages.map { it.id }.toSet() }) { Text("Tout") }
+                    },
+                )
+            } else {
+                TopAppBar(
+                    title = { Text(book.title.ifBlank { "Livre de voyage" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    actions = {
+                        IconButton(onClick = { vm.open(Screen.Settings) }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Réglages")
+                        }
+                    },
+                )
+            }
         },
         snackbarHost = { MessageHost(state, vm) },
     ) { padding ->
@@ -88,47 +107,79 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
             }
             BusyBanner(state.busyMessage)
 
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.open(Screen.Picker) }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.AddPhotoAlternate, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("1. Choisir les photos du voyage")
-                }
-                FilledTonalButton(
-                    onClick = { vm.annotateAll() },
-                    enabled = book.pages.isNotEmpty() && state.busyMessage == null,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.AutoAwesome, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("2. Rédiger les légendes")
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = { vm.open(Screen.Viewer(0)) },
-                        enabled = book.pages.isNotEmpty(),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.MenuBook, null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("3. Feuilleter")
+            if (selectionMode) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Rédiger les légendes des photos sélectionnées :", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(
+                            onClick = { vm.annotateSelection(selected.toList(), CaptionSource.CLAUDE); selected = emptySet() },
+                            enabled = state.busyMessage == null,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, null); Spacer(Modifier.width(6.dp)); Text("Claude")
+                        }
+                        FilledTonalButton(
+                            onClick = { vm.annotateSelection(selected.toList(), CaptionSource.WIKIPEDIA); selected = emptySet() },
+                            enabled = state.busyMessage == null,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.Public, null); Spacer(Modifier.width(6.dp)); Text("Wikipédia")
+                        }
                     }
-                    OutlinedButton(
-                        onClick = { showShare = true },
+                    OutlinedButton(onClick = { confirmDeleteSelection = true }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Delete, null); Spacer(Modifier.width(6.dp)); Text("Retirer du livre")
+                    }
+                }
+            } else {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { vm.open(Screen.Picker) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.AddPhotoAlternate, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("1. Choisir les photos du voyage")
+                    }
+                    FilledTonalButton(
+                        onClick = { vm.annotateAll() },
                         enabled = book.pages.isNotEmpty() && state.busyMessage == null,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Icon(Icons.Default.Share, null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("4. Partager")
+                        Icon(Icons.Default.AutoAwesome, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("2. Rédiger les légendes")
                     }
-                }
-                if (book.participants.isEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { vm.open(Screen.Viewer(0)) },
+                            enabled = book.pages.isNotEmpty(),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.MenuBook, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("3. Feuilleter")
+                        }
+                        OutlinedButton(
+                            onClick = { showShare = true },
+                            enabled = book.pages.isNotEmpty() && state.busyMessage == null,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Icon(Icons.Default.Share, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("4. Partager")
+                        }
+                    }
                     Text(
-                        "Astuce : ajoutez les participants du voyage dans les réglages ⚙️",
+                        if (book.pages.isNotEmpty())
+                            "Astuce : appui long sur une photo pour en sélectionner plusieurs (rédiger ou retirer en lot)."
+                        else "",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.secondary,
                     )
+                    if (book.participants.isEmpty()) {
+                        Text(
+                            "Astuce : ajoutez les participants du voyage dans les réglages ⚙️",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
                 }
             }
 
@@ -147,8 +198,12 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
                     itemsIndexed(book.pages, key = { _, p -> p.id }) { index, page ->
                         PageRow(
                             index, page, state,
-                            onDelete = { pendingDelete = page.id },
-                            onClick = { vm.open(Screen.Editor(page.id)) },
+                            selected = page.id in selected,
+                            selectionMode = selectionMode,
+                            onToggle = {
+                                selected = if (page.id in selected) selected - page.id else selected + page.id
+                            },
+                            onOpen = { vm.open(Screen.Editor(page.id)) },
                         )
                     }
                 }
@@ -166,27 +221,40 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
         }
     }
 
-    pendingDelete?.let { id ->
+    if (confirmDeleteSelection) {
         AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("Retirer cette photo du livre ?") },
-            text = { Text("La photo reste dans la galerie du téléphone.") },
-            confirmButton = { TextButton(onClick = { vm.deletePage(id); pendingDelete = null }) { Text("Retirer") } },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Annuler") } },
+            onDismissRequest = { confirmDeleteSelection = false },
+            title = { Text("Retirer ${selected.size} photo(s) du livre ?") },
+            text = { Text("Les photos restent dans la galerie du téléphone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    selected.forEach { vm.deletePage(it) }
+                    selected = emptySet()
+                    confirmDeleteSelection = false
+                }) { Text("Retirer") }
+            },
+            dismissButton = { TextButton(onClick = { confirmDeleteSelection = false }) { Text("Annuler") } },
         )
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PageRow(index: Int, page: BookPage, state: UiState, onDelete: () -> Unit, onClick: () -> Unit) {
+private fun PageRow(
+    index: Int,
+    page: BookPage,
+    state: UiState,
+    selected: Boolean,
+    selectionMode: Boolean,
+    onToggle: () -> Unit,
+    onOpen: () -> Unit,
+) {
     val names = state.book.participants.filter { it.id in page.participantIds }.joinToString(", ") { it.name }
-    // Appui long → une poubelle apparaît pour retirer la photo ; un simple appui l'annule.
-    var armed by remember { mutableStateOf(false) }
+    // Appui long → entre en mode sélection ; en sélection, un appui coche/décoche.
     Card(
         modifier = Modifier.fillMaxWidth().combinedClickable(
-            onClick = { if (armed) armed = false else onClick() },
-            onLongClick = { armed = true },
+            onClick = { if (selectionMode) onToggle() else onOpen() },
+            onLongClick = onToggle,
         ),
     ) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -212,10 +280,12 @@ private fun PageRow(index: Int, page: BookPage, state: UiState, onDelete: () -> 
                     Text("👥 $names", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            if (armed) {
-                IconButton(onClick = { armed = false; onDelete() }) {
-                    Icon(Icons.Default.Delete, "Retirer la photo", tint = MaterialTheme.colorScheme.error)
-                }
+            if (selectionMode) {
+                Icon(
+                    if (selected) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                    contentDescription = if (selected) "Sélectionnée" else "Non sélectionnée",
+                    tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                )
             } else {
                 when {
                     page.status == AnnotationStatus.RUNNING -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
