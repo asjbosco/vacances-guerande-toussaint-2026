@@ -116,6 +116,29 @@ object PhotoImporter {
             out.absolutePath
         }
 
+    /**
+     * Recadre la photo selon un rectangle exprimé en fractions (0..1) de l'image,
+     * et écrit le résultat dans un nouveau fichier. Renvoie le nouveau chemin.
+     */
+    suspend fun cropToNewFile(
+        srcPath: String,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        photosDir: File,
+    ): String? = withContext(Dispatchers.IO) {
+        val bmp = BitmapFactory.decodeFile(srcPath) ?: return@withContext null
+        val x = (left * bmp.width).toInt().coerceIn(0, bmp.width - 1)
+        val y = (top * bmp.height).toInt().coerceIn(0, bmp.height - 1)
+        val w = ((right - left) * bmp.width).toInt().coerceAtLeast(1).coerceAtMost(bmp.width - x)
+        val h = ((bottom - top) * bmp.height).toInt().coerceAtLeast(1).coerceAtMost(bmp.height - y)
+        val cropped = Bitmap.createBitmap(bmp, x, y, w, h)
+        val out = File(photosDir, UUID.randomUUID().toString() + ".jpg")
+        FileOutputStream(out).use { cropped.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        out.absolutePath
+    }
+
     fun decodeFileScaled(path: String, maxSide: Int): Bitmap? =
         decodeScaledFromFile(File(path), maxSide)
 
