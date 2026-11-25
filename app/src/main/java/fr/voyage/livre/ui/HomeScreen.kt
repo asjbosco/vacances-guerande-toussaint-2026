@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -89,7 +90,12 @@ fun HomeScreen(state: UiState, vm: BookViewModel) {
                 )
             } else {
                 TopAppBar(
-                    title = { Text(book.title.ifBlank { "Livre de voyage" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    title = { Text(book.title.ifBlank { "Livre sans titre" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    navigationIcon = {
+                        IconButton(onClick = { vm.backToLibrary() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Mes livres")
+                        }
+                    },
                     actions = {
                         IconButton(onClick = { vm.open(Screen.Settings) }) {
                             Icon(Icons.Default.Settings, contentDescription = "Réglages")

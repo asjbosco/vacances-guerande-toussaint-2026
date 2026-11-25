@@ -18,6 +18,7 @@ import fr.voyage.livre.ui.BookViewModel
 import fr.voyage.livre.ui.CropScreen
 import fr.voyage.livre.ui.EditorScreen
 import fr.voyage.livre.ui.HomeScreen
+import fr.voyage.livre.ui.LibraryScreen
 import fr.voyage.livre.ui.PdfPreviewScreen
 import fr.voyage.livre.ui.PickerScreen
 import fr.voyage.livre.ui.Screen
@@ -34,8 +35,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             LivreTheme {
                 val state by viewModel.state.collectAsStateWithLifecycle()
-                BackHandler(enabled = state.screen != Screen.Home) { viewModel.back() }
+                BackHandler(enabled = state.screen != Screen.Library) { viewModel.back() }
                 when (val s = state.screen) {
+                    Screen.Library -> LibraryScreen(state, viewModel)
                     Screen.Home -> HomeScreen(state, viewModel)
                     Screen.Picker -> PickerScreen(state, viewModel)
                     is Screen.Editor -> EditorScreen(state, viewModel, s.pageId)

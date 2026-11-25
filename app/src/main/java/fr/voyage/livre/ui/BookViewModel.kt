@@ -21,17 +21,20 @@ import fr.voyage.livre.share.PdfExporter
 import fr.voyage.livre.share.ShareHelper
 import fr.voyage.livre.share.ShareTarget
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 
 sealed interface Screen {
+    data object Library : Screen
     data object Home : Screen
     data object Picker : Screen
     data class Editor(val pageId: String) : Screen
@@ -42,9 +45,13 @@ sealed interface Screen {
 }
 
 data class UiState(
+    /** Tous les livres enregistrés (bibliothèque), du plus récent au plus ancien. */
+    val library: List<Book> = emptyList(),
+    /** Identifiant du livre ouvert, s'il y en a un. */
+    val currentId: String? = null,
     val book: Book = Book(),
     val loaded: Boolean = false,
-    val screen: Screen = Screen.Home,
+    val screen: Screen = Screen.Library,
     val galleryPhotos: List<GalleryPhoto> = emptyList(),
     val galleryLoading: Boolean = false,
     val busyMessage: String? = null,
@@ -70,26 +77,69 @@ class BookViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            val book = repo.load()
-            // Livre tout neuf → on invite d'abord à renseigner le voyage (titre, région, dates).
-            val firstRun = book.pages.isEmpty() && book.title.isBlank() && book.destination.isBlank()
-            _state.update {
-                it.copy(book = book, loaded = true, screen = if (firstRun) Screen.Settings else it.screen)
-            }
+            val lib = repo.loadLibrary()
+            _state.update { it.copy(library = lib, loaded = true, screen = Screen.Library) }
         }
     }
 
     // ---------- Navigation ----------
 
     fun open(screen: Screen) = _state.update { it.copy(screen = screen) }
-    fun back() = open(Screen.Home)
     fun clearMessage() = _state.update { it.copy(message = null) }
     private fun say(text: String) = _state.update { it.copy(message = text) }
 
+    /** Retour contextuel : de l'accueil on revient à la bibliothèque ; du recadrage à la photo ; sinon à l'accueil. */
+    fun back() {
+        val target = when (val s = _state.value.screen) {
+            Screen.Home -> Screen.Library
+            is Screen.Crop -> Screen.Editor(s.pageId)
+            else -> Screen.Home
+        }
+        open(target)
+    }
+
+    // ---------- Bibliothèque (plusieurs livres) ----------
+
+    fun backToLibrary() = open(Screen.Library)
+
+    /** Ouvre un livre existant. */
+    fun openBook(id: String) {
+        val b = _state.value.library.firstOrNull { it.id == id } ?: return
+        _state.update { it.copy(currentId = id, book = b, screen = Screen.Home) }
+    }
+
+    /** Crée un nouveau livre vierge et ouvre ses réglages. */
+    fun newBook() {
+        val b = Book(updatedAt = System.currentTimeMillis())
+        val newLib = listOf(b) + _state.value.library
+        _state.update { it.copy(library = newLib, currentId = b.id, book = b, screen = Screen.Settings) }
+        viewModelScope.launch { repo.saveLibrary(newLib) }
+    }
+
+    /** Supprime un livre (et les photos qu'il contient). */
+    fun deleteBook(id: String) {
+        val b = _state.value.library.firstOrNull { it.id == id } ?: return
+        val newLib = _state.value.library.filterNot { it.id == id }
+        val newCurrent = _state.value.currentId?.takeIf { it != id }
+        _state.update {
+            it.copy(
+                library = newLib,
+                currentId = newCurrent,
+                book = newLib.firstOrNull { bk -> bk.id == newCurrent } ?: Book(),
+            )
+        }
+        viewModelScope.launch {
+            withContext(kotlinx.coroutines.Dispatchers.IO) { b.pages.forEach { File(it.photoPath).delete() } }
+            repo.saveLibrary(newLib)
+        }
+    }
+
     private fun editBook(transform: (Book) -> Book) {
-        _state.update { it.copy(book = transform(it.book)) }
-        val snapshot = _state.value.book
-        viewModelScope.launch { repo.save(snapshot) }
+        val id = _state.value.currentId ?: return
+        val updated = transform(_state.value.book).copy(id = id, updatedAt = System.currentTimeMillis())
+        val newLib = _state.value.library.map { if (it.id == id) updated else it }
+        _state.update { it.copy(book = updated, library = newLib) }
+        viewModelScope.launch { repo.saveLibrary(newLib) }
     }
 
     private fun editPage(id: String, transform: (BookPage) -> BookPage) = editBook { b ->
