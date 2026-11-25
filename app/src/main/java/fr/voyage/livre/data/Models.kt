@@ -46,6 +46,9 @@ data class BookPage(
 
 @Serializable
 data class Book(
+    val id: String = UUID.randomUUID().toString(),
+    /** Dernière modification (ms) : sert à trier la bibliothèque. */
+    val updatedAt: Long = 0L,
     val title: String = "",
     /** Région du voyage : aide à retrouver le lieu quand une photo n'a pas de GPS. */
     val destination: String = "",
