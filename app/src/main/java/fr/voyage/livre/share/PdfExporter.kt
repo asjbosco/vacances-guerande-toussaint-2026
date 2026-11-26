@@ -135,7 +135,6 @@ object PdfExporter {
     private const val TEXT_GAP = 8f          // entre les lignes de texte d'une légende
     private const val FOOTER_SPACE = 24f     // place réservée au numéro de page
     private const val INTER_CARD = 28f       // entre deux photos empilées
-    private const val COL_GAP = 28f          // entre deux photos côte à côte
     private const val RULE_OUTER = 1.6f      // filet extérieur (épais)
     private const val RULE_INNER = 0.8f      // filet intérieur (moitié de l'épaisseur)
     private const val RULE_GAP = 3f          // écart entre les deux filets
@@ -144,81 +143,55 @@ object PdfExporter {
     private const val PHOTO_CAPTION_GAP = 12f // écart photo → cartouche de légende
 
     /**
-     * Dispose les photos en tenant compte de leur orientation :
-     *  - deux photos PAYSAGE qui se suivent → l'une au-dessus de l'autre, page verticale ;
-     *  - deux photos PORTRAIT qui se suivent → côte à côte, page tournée en paysage ;
-     *  - sinon une seule photo sur la page (format vertical).
-     * On ne met deux photos que si leurs légendes laissent la place à une photo lisible.
+     * Mise en page, toujours sur page verticale (A4 portrait) :
+     *  - deux photos PAYSAGE qui se suivent → l'une au-dessus de l'autre ;
+     *  - une photo PORTRAIT → seule sur sa page ;
+     *  - une photo paysage isolée (ou la dernière) → seule sur sa page.
+     * Dans tous les cas, la photo est réduite au besoin pour que la légende tienne EN ENTIER
+     * dans son cadre (voir drawCard), sans jamais être tronquée.
      */
     private fun drawPhotoPages(doc: PdfDocument, book: Book, pages: List<BookPage>) {
-        // Page verticale (empilement)
-        val vContentW = (PAGE_W - 2 * MARGIN).toInt()
-        val vAvailH = PAGE_H - 2 * MARGIN - FOOTER_SPACE
-        val stackSlotH = (vAvailH - INTER_CARD) / 2f
-        // Page tournée en paysage (côte à côte)
-        val lContentW = (PAGE_H - 2 * MARGIN).toInt()
-        val lAvailH = PAGE_W - 2 * MARGIN - FOOTER_SPACE
-        val colW = ((lContentW - COL_GAP) / 2f).toInt()
+        val contentW = (PAGE_W - 2 * MARGIN).toInt()
+        val availH = PAGE_H - 2 * MARGIN - FOOTER_SPACE
+        val stackSlotH = (availH - INTER_CARD) / 2f
 
         var i = 0
         var number = 2
         while (i < pages.size) {
             val a = pages[i]
             val b = pages.getOrNull(i + 1)
-            val aPortrait = isPortrait(a)
-            val bPortrait = b?.let { isPortrait(it) }
+            val twoLandscape = b != null && !isPortrait(a) && !isPortrait(b)
 
-            // Appariement par simple orientation : la mise en page garantit ensuite une
-            // photo bien dimensionnée et une légende qui tient dessous.
-            val twoLandscape = b != null && !aPortrait && bPortrait == false
-            val twoPortrait = b != null && aPortrait && bPortrait == true
-
-            when {
-                twoLandscape -> {
-                    val page = startPage(doc, number, landscape = false)
-                    drawCard(page.canvas, book, a, MARGIN, MARGIN, vContentW, stackSlotH)
-                    val sepY = MARGIN + stackSlotH + INTER_CARD / 2f
-                    page.canvas.drawLine(
-                        MARGIN, sepY, PAGE_W - MARGIN, sepY,
-                        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = MUTED; strokeWidth = 0.5f },
-                    )
-                    drawCard(page.canvas, book, b!!, MARGIN, MARGIN + stackSlotH + INTER_CARD, vContentW, stackSlotH)
-                    footer(page.canvas, number, PAGE_W, PAGE_H)
-                    doc.finishPage(page)
-                    i += 2
-                }
-                twoPortrait -> {
-                    val page = startPage(doc, number, landscape = true)
-                    drawCard(page.canvas, book, a, MARGIN, MARGIN, colW, lAvailH)
-                    drawCard(page.canvas, book, b!!, MARGIN + colW + COL_GAP, MARGIN, colW, lAvailH)
-                    footer(page.canvas, number, PAGE_H, PAGE_W)
-                    doc.finishPage(page)
-                    i += 2
-                }
-                else -> {
-                    val page = startPage(doc, number, landscape = false)
-                    drawCard(page.canvas, book, a, MARGIN, MARGIN, vContentW, vAvailH)
-                    footer(page.canvas, number, PAGE_W, PAGE_H)
-                    doc.finishPage(page)
-                    i += 1
-                }
+            val page = startPage(doc, number)
+            if (twoLandscape) {
+                drawCard(page.canvas, book, a, MARGIN, MARGIN, contentW, stackSlotH)
+                val sepY = MARGIN + stackSlotH + INTER_CARD / 2f
+                page.canvas.drawLine(
+                    MARGIN, sepY, PAGE_W - MARGIN, sepY,
+                    Paint(Paint.ANTI_ALIAS_FLAG).apply { color = MUTED; strokeWidth = 0.5f },
+                )
+                drawCard(page.canvas, book, b!!, MARGIN, MARGIN + stackSlotH + INTER_CARD, contentW, stackSlotH)
+                i += 2
+            } else {
+                drawCard(page.canvas, book, a, MARGIN, MARGIN, contentW, availH)
+                i += 1
             }
+            footer(page.canvas, number)
+            doc.finishPage(page)
             number++
         }
     }
 
-    private fun startPage(doc: PdfDocument, number: Int, landscape: Boolean): PdfDocument.Page {
-        val w = if (landscape) PAGE_H else PAGE_W
-        val h = if (landscape) PAGE_W else PAGE_H
-        val page = doc.startPage(PdfDocument.PageInfo.Builder(w, h, number).create())
+    private fun startPage(doc: PdfDocument, number: Int): PdfDocument.Page {
+        val page = doc.startPage(PdfDocument.PageInfo.Builder(PAGE_W, PAGE_H, number).create())
         page.canvas.drawColor(Color.WHITE)
         return page
     }
 
-    private fun footer(canvas: Canvas, number: Int, pageW: Int, pageH: Int) {
+    private fun footer(canvas: Canvas, number: Int) {
         drawText(
             canvas, "$number", sans(9f, color = MUTED),
-            MARGIN, pageH - MARGIN + 8f, (pageW - 2 * MARGIN).toInt(), Layout.Alignment.ALIGN_CENTER,
+            MARGIN, PAGE_H - MARGIN + 8f, (PAGE_W - 2 * MARGIN).toInt(), Layout.Alignment.ALIGN_CENTER,
         )
     }
 
@@ -244,9 +217,10 @@ object PdfExporter {
         blocks.sumOf { it.height }.toFloat() + TEXT_GAP * (blocks.size - 1).coerceAtLeast(0)
 
     /**
-     * Dessine une photo (ajustée à l'espace restant), centrée dans la colonne [x, x+cardWidth],
-     * puis la légende DANS un cartouche à double filet, aligné sur la largeur de la photo.
-     * La photo est réduite au besoin pour que l'ensemble tienne dans la hauteur [maxCardH].
+     * Dessine une photo puis sa légende dans un cartouche à double filet aligné sur la photo.
+     * Principe : on dimensionne le cadre de légende sur le TEXTE COMPLET (jamais tronqué),
+     * puis on réduit la photo pour que photo + cadre tiennent dans la hauteur [maxCardH],
+     * en laissant une marge intérieure haut/bas. Quelques passes suffisent à converger.
      */
     private fun drawCard(canvas: Canvas, book: Book, page: BookPage, x: Float, top: Float, cardWidth: Int, maxCardH: Float) {
         val photo = PhotoImporter.decodeFileScaled(page.photoPath, PHOTO_MAX_SIDE) ?: return
@@ -254,42 +228,41 @@ object PdfExporter {
         val ph = photo.height.toFloat()
         val insetH = RULE_GAP + CAP_PAD_H
         val insetV = RULE_GAP + CAP_PAD_V
+        val minPhotoH = maxCardH * 0.30f  // la photo ne descend jamais sous ce seuil
 
-        // 1) Photo d'abord : limitée par la largeur de la colonne et par ~68 % de la hauteur dispo.
-        val scale = minOf(cardWidth / pw, (maxCardH * 0.68f) / ph)
+        fun captionWidthFor(photoW: Float) = (photoW - 2 * insetH).toInt().coerceAtLeast(40)
+        fun boxHeightFor(photoW: Float): Float {
+            val b = captionBlocks(book, page, captionWidthFor(photoW))
+            return if (b.isEmpty()) 0f else blocksHeight(b) + 2 * insetV
+        }
+
+        // Point de départ : photo limitée par la largeur et par ~72 % de la hauteur.
+        var scale = minOf(cardWidth / pw, (maxCardH * 0.72f) / ph)
+        repeat(3) {
+            val boxH = boxHeightFor(pw * scale)
+            val gap = if (boxH > 0f) PHOTO_CAPTION_GAP else 0f
+            val budget = (maxCardH - gap - boxH).coerceAtLeast(minPhotoH)
+            scale = minOf(cardWidth / pw, budget / ph)
+        }
+
         val photoW = pw * scale
         val photoH = ph * scale
         val left = x + (cardWidth - photoW) / 2f
+        val blocks = captionBlocks(book, page, captionWidthFor(photoW))
+        val boxH = if (blocks.isEmpty()) 0f else blocksHeight(blocks) + 2 * insetV
 
-        // 2) Place restante pour le cartouche de légende, aligné sur la largeur de la photo.
-        val captionAreaH = (maxCardH - photoH - PHOTO_CAPTION_GAP).coerceAtLeast(0f)
-        val textW = (photoW - 2 * insetH).toInt().coerceAtLeast(40)
-
-        // 3) Taille de police réduite au besoin pour que la légende tienne dans la place restante.
-        var fontScale = 1.0f
-        var blocks = captionBlocks(book, page, textW, fontScale)
-        while (blocksHeight(blocks) + 2 * insetV > captionAreaH && fontScale > 0.7f) {
-            fontScale -= 0.1f
-            blocks = captionBlocks(book, page, textW, fontScale)
-        }
-        val boxH = (blocksHeight(blocks) + 2 * insetV).coerceAtMost(captionAreaH)
-
-        // Dessin : la photo en haut…
         var y = top
         canvas.drawBitmap(photo, null, RectF(left, y, left + photoW, y + photoH), Paint(Paint.FILTER_BITMAP_FLAG))
         photo.recycle()
+        if (blocks.isEmpty()) return
         y += photoH + PHOTO_CAPTION_GAP
 
-        // …puis le cartouche (double filet) s'il reste assez de place.
-        if (blocks.isEmpty() || captionAreaH < 2 * insetV + 6f) return
+        // Cartouche dimensionné sur TOUT le texte (aucune troncature), double filet.
         val outer = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = ACCENT; strokeWidth = RULE_OUTER }
         val inner = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = ACCENT; strokeWidth = RULE_INNER }
         canvas.drawRect(left, y, left + photoW, y + boxH, outer)
         canvas.drawRect(left + RULE_GAP, y + RULE_GAP, left + photoW - RULE_GAP, y + boxH - RULE_GAP, inner)
 
-        // Texte à l'intérieur du cartouche, découpé proprement si jamais il dépassait.
-        canvas.save()
-        canvas.clipRect(left + insetH, y + insetV, left + photoW - insetH, y + boxH - insetV)
         var ty = y + insetV
         blocks.forEach { l ->
             canvas.save()
@@ -298,7 +271,6 @@ object PdfExporter {
             canvas.restore()
             ty += l.height + TEXT_GAP
         }
-        canvas.restore()
     }
 
     // ---------- Outils de dessin ----------
